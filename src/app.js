@@ -30,8 +30,8 @@ app.use(
     credentials: true,
   })
 );
-// Handle preflight requests
-app.options('*', cors());
+// Note: Preflight OPTIONS are handled by the cors middleware above.
+// Avoid wildcard path here due to path-to-regexp incompatibilities on some runtimes.
 app.use(express.json());
 
 app.get('/health', (req, res) => res.json({ ok: true }));
