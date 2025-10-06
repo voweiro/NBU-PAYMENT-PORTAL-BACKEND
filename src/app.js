@@ -15,7 +15,7 @@ const allowedOrigins = [
   process.env.FRONTEND_URL,
   process.env.FRONTEND_URL?.replace('https://', 'http://'),
   'http://localhost:3000',
-  'https://nbu-payment-portal-frontend.vercel.app/',
+  'https://nbu-payment-portal-frontend.vercel.app',
 ].filter(Boolean);
 
 app.use(
