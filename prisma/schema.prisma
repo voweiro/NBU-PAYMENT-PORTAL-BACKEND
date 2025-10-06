@@ -1,0 +1,83 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Undergraduate study levels
+enum Level {
+  L100
+  L200
+  L300
+  L400
+  L500
+  L600
+  ALL
+}
+
+enum ProgramType {
+  undergraduate
+  postgraduate
+  diploma
+  pre_degree
+}
+
+enum AdminRole {
+  super_admin
+  admin
+}
+
+enum PaymentStatus {
+  successful
+  pending
+  failed
+}
+
+model Program {
+  program_id   Int         @id @default(autoincrement())
+  program_name String
+  program_type ProgramType
+  fees         Fee[]
+}
+
+model Fee {
+  fee_id       Int      @id @default(autoincrement())
+  program_id   Int
+  program      Program  @relation(fields: [program_id], references: [program_id])
+  fee_category String
+  amount       Decimal  @db.Decimal(14, 2)
+  session      String?
+  semester     String?
+  levels       Level[]  @default([])
+  payments     Payment[]
+}
+
+model Admin {
+  admin_id   Int       @id @default(autoincrement())
+  name       String
+  email      String    @unique
+  password   String
+  role       AdminRole @default(admin)
+  created_at DateTime  @default(now())
+}
+
+model Payment {
+  payment_id        Int           @id @default(autoincrement())
+  fee_id            Int
+  fee               Fee           @relation(fields: [fee_id], references: [fee_id])
+  amount_paid       Decimal       @db.Decimal(14, 2)
+  transaction_ref   String        @unique
+  status            PaymentStatus
+  payment_date      DateTime      @default(now())
+  receipt_drive_url String?
+  student_email     String
+  student_name      String?
+  jamb_number       String?
+  matric_number     String?
+  level             Level?
+  phone_number      String?
+  address           String?
+}
