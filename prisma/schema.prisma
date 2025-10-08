@@ -83,4 +83,5 @@ model Payment {
   phone_number      String?
   address           String?
   items             Json?
+  original_reference String?
 }

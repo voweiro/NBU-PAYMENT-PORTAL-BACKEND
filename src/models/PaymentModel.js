@@ -29,7 +29,7 @@ class PaymentModel extends BaseModel {
     });
   }
 
-  async createPaymentRecord({ feeId, feeIds, items, studentEmail, studentName, amount, reference, status = 'pending', jambNumber, matricNumber, level, phoneNumber, address }) {
+  async createPaymentRecord({ feeId, feeIds, items, studentEmail, studentName, amount, reference, status = 'pending', jambNumber, matricNumber, level, phoneNumber, address, originalReference }) {
     return this.model.create({
       data: {
         fee_id: Number(feeId ?? (Array.isArray(feeIds) ? Number(feeIds[0]) : undefined)),
@@ -44,6 +44,7 @@ class PaymentModel extends BaseModel {
         phone_number: phoneNumber,
         address,
         items,
+        original_reference: originalReference,
       },
     });
   }
@@ -54,6 +55,10 @@ class PaymentModel extends BaseModel {
 
   async setReceiptUrlById(id, url) {
     return this.model.update({ where: { payment_id: Number(id) }, data: { receipt_drive_url: url } });
+  }
+
+  async setReferenceById(id, newReference) {
+    return this.model.update({ where: { payment_id: Number(id) }, data: { transaction_ref: newReference } });
   }
 
   async updateBalanceByRef(reference, amountToAdd) {

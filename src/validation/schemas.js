@@ -50,7 +50,7 @@ const PaymentInitiateSchema = z.object({
       jambNumber: z.string().min(5).optional(),
       matricNumber: z.string().min(5).optional(),
       level: z.enum(['L100', 'L200', 'L300', 'L400', 'L500', 'L600', 'ALL']).optional(),
-      percent: z.number().optional(),
+      percent: z.union([z.literal(25), z.literal(50), z.literal(75), z.literal(100)]).optional(),
       // GlobalPay requires numeric 11-digit phone; enforce at schema level
       phoneNumber: z.string().regex(/^\d{11}$/, 'Phone number must be 11 digits').optional(),
       // Address recommended > 5 chars per GlobalPay docs
@@ -64,13 +64,19 @@ const PaymentInitiateSchema = z.object({
 
 const PaymentVerifySchema = z.object({
   params: z.object({ reference: z.string().min(3) }),
-  query: z.object({ gateway: z.enum(['paystack', 'flutterwave', 'global']) }),
+  query: z.object({
+    gateway: z.enum(['paystack', 'flutterwave', 'global']),
+    original_reference: z.string().min(3).optional(),
+  }),
 });
 
 const BalanceInitiateSchema = z.object({
   body: z.object({
     reference: z.string().min(3),
     gateway: z.enum(['paystack', 'flutterwave', 'global']).default('global'),
+    // Optional overrides; required for GlobalPay if not present on original payment
+    phoneNumber: z.string().regex(/^\d{11}$/, 'Phone number must be 11 digits').optional(),
+    address: z.string().min(6, 'Address must be at least 6 characters').optional(),
   }),
 });
 

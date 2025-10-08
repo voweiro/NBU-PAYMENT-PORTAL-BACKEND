@@ -82,6 +82,7 @@ class PaymentsController {
         percentage_paid: Number(pct.toFixed(2)),
         student_email: payment.student_email,
         student_name: payment.student_name ?? null,
+        phone_number: payment.phone_number ?? null,
         items: payment.items || null,
       });
     } catch (err) {
@@ -91,16 +92,18 @@ class PaymentsController {
 
   async initiateBalance(req, res) {
     try {
-      const { reference, gateway = 'global' } = (req.validated && req.validated.body) || req.body;
+      const { reference, gateway = 'global', phoneNumber, address } = (req.validated && req.validated.body) || req.body;
       const payment = await this.paymentModel.getByRef(reference);
       if (!payment) return ApiResponse.error(res, 'Payment not found', 404);
 
       // Compute remaining balance
       let totalAmount = 0;
+      let feeRecord = null;
       if (Array.isArray(payment.items) && payment.items.length > 0) {
         totalAmount = payment.items.reduce((sum, it) => sum + Number(it.amount || 0), 0);
       } else {
         const fee = await this.feeModel.getById(payment.fee_id);
+        feeRecord = fee;
         totalAmount = Number(fee?.amount || 0);
       }
       const amountPaid = Number(payment.amount_paid || 0);
@@ -108,7 +111,15 @@ class PaymentsController {
       if (remaining <= 0) return ApiResponse.error(res, 'Payment already fully paid', 400);
 
       const FRONTEND_URL = process.env.FRONTEND_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-      const redirectUrl = `${FRONTEND_URL}/payment/callback`;
+      // Include original_reference so callback/verify can locate the existing record without mutating its reference
+      const redirectUrl = `${FRONTEND_URL}/payment/callback?original_reference=${encodeURIComponent(payment.transaction_ref)}`;
+
+      // Use provided phone/address overrides or fallback to existing payment record
+      const effectivePhone = phoneNumber || payment.phone_number || '';
+      const effectiveAddress = address || payment.address || '';
+      if (gateway === 'global' && (!/^\d{11}$/.test(effectivePhone))) {
+        return ApiResponse.error(res, 'Phone number must be 11 digits for GlobalPay balance payments', 400);
+      }
 
       const initData = await PaymentGateway.initiatePayment({
         gateway,
@@ -118,13 +129,37 @@ class PaymentsController {
           studentName: payment.student_name,
           balancePayment: true,
           balanceAmount: remaining,
+          phoneNumber: effectivePhone,
+          address: effectiveAddress,
           feeNames: Array.isArray(payment.items) && payment.items.length > 0 ? payment.items.map((i) => i.fee_category) : undefined,
         },
         redirectUrl,
       });
 
-      // We do not create a new record; we keep existing and reuse verification path
-      return ApiResponse.ok(res, { reference: payment.transaction_ref, paymentId: payment.payment_id, ...initData });
+      // Create a distinct pending payment record for the balance using the gateway reference
+      const newRef = initData.reference;
+      const itemsArray = (Array.isArray(payment.items) && payment.items.length > 0)
+        ? payment.items.map((it) => ({ fee_id: it.fee_id ?? payment.fee_id, fee_category: it.fee_category, amount: Number(it.amount || 0) }))
+        : (feeRecord ? [{ fee_id: feeRecord.fee_id, fee_category: feeRecord.fee_category, amount: Number(feeRecord.amount || 0) }] : undefined);
+
+      const createdBalance = await this.paymentModel.createPaymentRecord({
+        feeId: payment.fee_id,
+        items: itemsArray,
+        studentEmail: payment.student_email,
+        studentName: payment.student_name,
+        amount: Math.round(remaining),
+        reference: newRef,
+        status: 'pending',
+        jambNumber: payment.jamb_number,
+        matricNumber: payment.matric_number,
+        level: payment.level,
+        phoneNumber: effectivePhone,
+        address: effectiveAddress,
+        originalReference: payment.transaction_ref,
+      });
+
+      // Do not overwrite the original transaction_ref; return both for client awareness
+      return ApiResponse.ok(res, { reference: payment.transaction_ref, gateway_reference: newRef, paymentId: payment.payment_id, balancePaymentId: createdBalance.payment_id, ...initData });
     } catch (err) {
       return ApiResponse.error(res, err);
     }
@@ -198,8 +233,9 @@ class PaymentsController {
         }
       }
 
-      // Support partial payment: 50% or 100% for single or multiple fees
-      const pct = percent && Number(percent) === 50 ? 50 : 100;
+      // Support partial payment: 25%, 50%, 75% or 100% for single or multiple fees
+      const allowedPercents = [25, 50, 75, 100];
+      const pct = allowedPercents.includes(Number(percent)) ? Number(percent) : 100;
       const totalAmount = fees.reduce((sum, f) => sum + Number(f.amount || 0), 0);
       const amountToCharge = Math.round(totalAmount * (pct / 100));
 
@@ -259,44 +295,92 @@ class PaymentsController {
   async verify(req, res) {
     try {
       const { reference } = req.params;
-      const { gateway } = req.validated.query || req.query;
-      const payment = await this.paymentModel.getByRef(reference);
+      const { gateway, original_reference } = req.validated.query || req.query;
+      // Use original_reference to locate the existing record when verifying a balance payment
+      const lookupRef = original_reference || reference;
+      const payment = await this.paymentModel.getByRef(lookupRef);
       if (!payment) return ApiResponse.error(res, 'Payment not found', 404);
 
       const verifyData = await PaymentGateway.verifyPayment({ gateway, reference });
 
       const status = verifyData.verified ? 'successful' : 'failed';
-      await this.paymentModel.updateStatusByRef(reference, status);
+      if (original_reference) {
+        // Balance payment flow: mark the new balance record by its own gateway reference
+        await this.paymentModel.updateStatusByRef(reference, status);
 
-      if (status === 'successful') {
-        try {
-          const fee = await this.feeModel.getById(payment.fee_id);
-          const program = await this.feeModel.prisma.program.findUnique({ where: { program_id: fee.program_id } });
-          const receipt = await ReceiptService.generateAndUploadReceipt({ payment, fee, program });
-          if (receipt.driveUrl) {
-            await this.paymentModel.setReceiptUrlById(payment.payment_id, receipt.driveUrl);
-          }
+        if (status === 'successful') {
+          // Aggregate the balance payment amount into the original record
+          const balanceRecord = await this.paymentModel.getByRef(reference);
+          const addAmount = Number(balanceRecord?.amount_paid || 0);
+          try {
+            const updatedOriginal = await this.paymentModel.updateBalanceByRef(original_reference, addAmount);
 
-          if (this.emailService) {
-            await this.emailService.sendMail({
-              to: payment.student_email,
-              subject: 'Payment Receipt',
-              text: 'Your payment was successful. Receipt attached.',
-              attachments: [
-                {
-                  filename: receipt.filename,
-                  content: receipt.buffer,
-                },
-              ],
-            });
+            // If now fully paid, generate receipt and email
+            if (updatedOriginal.status === 'successful') {
+              try {
+                const fee = await this.feeModel.getById(updatedOriginal.fee_id);
+                const program = await this.feeModel.prisma.program.findUnique({ where: { program_id: fee.program_id } });
+                const receipt = await ReceiptService.generateAndUploadReceipt({ payment: updatedOriginal, fee, program });
+                if (receipt.driveUrl) {
+                  await this.paymentModel.setReceiptUrlById(updatedOriginal.payment_id, receipt.driveUrl);
+                }
+
+                if (this.emailService) {
+                  await this.emailService.sendMail({
+                    to: updatedOriginal.student_email,
+                    subject: 'Payment Receipt',
+                    text: 'Your payment was successful. Receipt attached.',
+                    attachments: [
+                      {
+                        filename: receipt.filename,
+                        content: receipt.buffer,
+                      },
+                    ],
+                  });
+                }
+              } catch (genErr) {
+                // Do not fail verification endpoint if receipt/email generation fails
+                console.error('Receipt/email post-processing failed:', genErr?.message || genErr);
+              }
+            }
+          } catch (updErr) {
+            console.error('Balance aggregation failed:', updErr?.message || updErr);
           }
-        } catch (genErr) {
-          // Do not fail verification endpoint if receipt/email generation fails
-          console.error('Receipt/email post-processing failed:', genErr?.message || genErr);
+        }
+      } else {
+        // Normal payment flow: mark the original record by its own reference
+        await this.paymentModel.updateStatusByRef(lookupRef, status);
+
+        if (status === 'successful') {
+          try {
+            const fee = await this.feeModel.getById(payment.fee_id);
+            const program = await this.feeModel.prisma.program.findUnique({ where: { program_id: fee.program_id } });
+            const receipt = await ReceiptService.generateAndUploadReceipt({ payment, fee, program });
+            if (receipt.driveUrl) {
+              await this.paymentModel.setReceiptUrlById(payment.payment_id, receipt.driveUrl);
+            }
+
+            if (this.emailService) {
+              await this.emailService.sendMail({
+                to: payment.student_email,
+                subject: 'Payment Receipt',
+                text: 'Your payment was successful. Receipt attached.',
+                attachments: [
+                  {
+                    filename: receipt.filename,
+                    content: receipt.buffer,
+                  },
+                ],
+              });
+            }
+          } catch (genErr) {
+            // Do not fail verification endpoint if receipt/email generation fails
+            console.error('Receipt/email post-processing failed:', genErr?.message || genErr);
+          }
         }
       }
 
-      return ApiResponse.ok(res, { reference, status, paymentId: payment.payment_id, verifyData });
+      return ApiResponse.ok(res, { reference: lookupRef, status, paymentId: payment.payment_id, verifyData });
     } catch (err) {
       return ApiResponse.error(res, err);
     }

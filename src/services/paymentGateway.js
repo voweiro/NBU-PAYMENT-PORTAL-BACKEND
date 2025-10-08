@@ -154,8 +154,23 @@ async function verifyPayment({ gateway, reference }) {
       const verified = Boolean(isSuccessful && status === 'Success' || code === '0000');
       return { gateway, reference, verified, responseCode: code, responseMessage: message, paymentStatus: status };
     } catch (err) {
-      const message = err?.response?.data?.error || err?.message || 'GlobalPay verify error';
-      return { gateway, reference, verified: false, error: message };
+      // Fallback: some integrations require query by provider payRef
+      try {
+        const override = process.env.GLOBALPAY_QUERY_URL; // optional complete endpoint base
+        const root = 'https://paygw.globalpay.com.ng/globalpay-paymentgateway/api/paymentgateway';
+        const urlRef = `${override ? override : `${root}/query-single-transaction-by-reference`}/${encodeURIComponent(reference)}`;
+        const res2 = await axios.get(urlRef, { headers: { apikey: pubKey, language: 'en' } });
+        const body2 = res2.data;
+        const isSuccessful2 = body2?.isSuccessful === true;
+        const code2 = body2?.responseCode;
+        const status2 = body2?.data?.paymentStatus;
+        const message2 = body2?.responseMessage || body2?.successMessage || body2?.responseDescription || body2?.message;
+        const verified2 = Boolean(isSuccessful2 && status2 === 'Success' || code2 === '0000');
+        return { gateway, reference, verified: verified2, responseCode: code2, responseMessage: message2, paymentStatus: status2 };
+      } catch (err2) {
+        const message = err2?.response?.data?.error || err?.response?.data?.error || err2?.message || err?.message || 'GlobalPay verify error';
+        return { gateway, reference, verified: false, error: message };
+      }
     }
   }
 
