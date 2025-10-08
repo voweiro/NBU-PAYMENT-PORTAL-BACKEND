@@ -54,6 +54,7 @@ class FeesController {
       return ApiResponse.error(res, err);
     }
   }
+  //please work
 
   async remove(req, res) {
     try {
