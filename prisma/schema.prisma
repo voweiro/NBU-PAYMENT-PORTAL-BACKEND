@@ -80,4 +80,6 @@ model Payment {
   level             Level?
   phone_number      String?
   address           String?
+  // Optional JSON storing multi-fee items: [{ fee_id, fee_category, amount }]
+  items             Json?
 }

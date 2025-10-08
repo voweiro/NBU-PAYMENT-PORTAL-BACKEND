@@ -54,6 +54,9 @@ async function generateReceiptPDFBuffer({ payment, fee, program }) {
       const lightGray = '#ECF0F1';
       const accentGold = '#F39C12';
 
+      // Extract items (multi-fee) once and reuse
+      const items = Array.isArray(payment.items) ? payment.items : undefined;
+
       // Generate security features
       const securityHash = generateSecurityHash(payment, fee);
       const qrCodeDataUrl = await generateQRCode(payment);
@@ -180,7 +183,10 @@ async function generateReceiptPDFBuffer({ payment, fee, program }) {
       leftY += 35;
 
       doc.fontSize(10).font('Helvetica').text('Fee Category:', leftX, leftY);
-      doc.fontSize(12).font('Helvetica-Bold').text(fee.fee_category || 'N/A', leftX, leftY + 12);
+      const feeNamesStr = items && items.length > 0
+        ? items.map((it) => String(it.fee_category || 'Fee')).join(', ')
+        : (fee.fee_category || 'N/A');
+      doc.fontSize(12).font('Helvetica-Bold').text(feeNamesStr, leftX, leftY + 12, { width: 240 });
       leftY += 35;
 
       doc.fontSize(10).font('Helvetica').text('Payment Method:', leftX, leftY);
@@ -214,13 +220,40 @@ async function generateReceiptPDFBuffer({ payment, fee, program }) {
       doc.fillColor(darkGray).fontSize(10).font('Helvetica').text('Generated:', rightX, rightY);
       doc.fontSize(11).font('Helvetica-Bold').text(new Date().toLocaleDateString('en-GB'), rightX, rightY + 12);
 
+      // Multi-fee items table (if available)
+      let tableY = 440;
+      if (items && items.length > 0) {
+        doc.fillColor(darkGray).fontSize(12).font('Helvetica-Bold').text('Fees Paid', 40, tableY - 20);
+        // Table header
+        doc.fillColor(lightGray).rect(40, tableY, doc.page.width - 80, 28).fill();
+        doc.fillColor(darkGray).fontSize(11).font('Helvetica-Bold');
+        doc.text('Fee', 50, tableY + 8, { width: 300 });
+        doc.text('Amount (₦)', doc.page.width - 220, tableY + 8, { width: 160, align: 'right' });
+        // Rows
+        doc.fillColor(darkGray).font('Helvetica');
+        let y = tableY + 28;
+        items.forEach((it) => {
+          const cat = String(it.fee_category || 'Fee');
+          const amt = Number(it.amount || 0);
+          doc.text(cat, 50, y + 8, { width: 300 });
+          doc.text(amt.toLocaleString(), doc.page.width - 220, y + 8, { width: 160, align: 'right' });
+          y += 28;
+        });
+        tableY = y + 10;
+      }
+
       // Amount section with modern styling
-      const amountY = 480;
+      const amountY = Math.max(tableY, 480);
       doc.roundedRect(40, amountY, doc.page.width - 80, 120, 12).fill(darkGray);
       
-      const fullAmount = Number(fee.amount || 0);
       const amountPaid = Number(payment.amount_paid || 0);
-      const percentagePaid = fullAmount > 0 ? Math.round((amountPaid / fullAmount) * 100) : 0;
+      // When multiple fees are present, full amount equals sum of items; otherwise fee.amount
+      const fullAmount = items && items.length > 0
+        ? items.reduce((sum, it) => sum + Number(it.amount || 0), 0)
+        : Number(fee.amount || 0);
+      // Clamp display to 50% or 100% to avoid rounding artifacts
+      const rawPct = fullAmount > 0 ? (amountPaid / fullAmount) * 100 : 0;
+      const percentageDisplay = Math.abs(rawPct - 50) <= 5 ? 50 : 100;
       
       doc.fillColor(white)
          .fontSize(16)
@@ -251,8 +284,8 @@ async function generateReceiptPDFBuffer({ payment, fee, program }) {
          .text('Percentage Paid:', 60, amountY + 95);
       doc.fontSize(18)
          .font('Helvetica-Bold')
-         .fillColor(percentagePaid === 100 ? '#27AE60' : '#F39C12')
-         .text(`${percentagePaid}%`, doc.page.width - 200, amountY + 90);
+         .fillColor(percentageDisplay === 100 ? '#27AE60' : '#F39C12')
+         .text(`${percentageDisplay}%`, doc.page.width - 200, amountY + 90);
 
       // Security footer
       const footerY = 640;

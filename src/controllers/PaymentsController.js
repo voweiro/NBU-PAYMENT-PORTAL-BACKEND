@@ -51,20 +51,21 @@ class PaymentsController {
 
   async initiate(req, res) {
     try {
-      const { feeId, studentEmail, studentName, gateway = 'global', jambNumber, matricNumber, percent, level, phoneNumber, address } = req.validated.body || req.body;
-      const fee = await this.feeModel.getById(feeId);
-      if (!fee) return ApiResponse.error(res, 'Fee not available', 400);
+      const { feeId, feeIds, studentEmail, studentName, gateway = 'global', jambNumber, matricNumber, percent, level, phoneNumber, address } = req.validated.body || req.body;
+      // Support single or multiple fees
+      const ids = Array.isArray(feeIds) && feeIds.length > 0 ? feeIds.map((id) => Number(id)) : [Number(feeId)];
+      const fees = await this.feeModel.prisma.fee.findMany({ where: { fee_id: { in: ids } }, include: { program: true } });
+      if (!fees || fees.length === 0) return ApiResponse.error(res, 'Fee(s) not available', 400);
+      if (fees.length !== ids.length) return ApiResponse.error(res, 'Some selected fees were not found', 400);
 
       // If program type is undergraduate, require either JAMB or Matric number
-      const program = await this.feeModel.prisma.program.findUnique({ where: { program_id: fee.program_id } });
+      const program = fees[0].program;
       if (program?.program_type === 'undergraduate' && !jambNumber && !matricNumber) {
         return ApiResponse.error(res, 'JAMB number or Matric number is required for undergraduate payments', 400);
       }
 
       // For undergraduate programs, validate provided level against fee.levels
       if (program?.program_type === 'undergraduate') {
-        const allowed = Array.isArray(fee.levels) ? fee.levels : [];
-        const isAll = allowed.includes('ALL');
         const validLevels = ['L100', 'L200', 'L300', 'L400', 'L500', 'L600', 'ALL'];
         if (!level) {
           return ApiResponse.error(res, 'Level is required for undergraduate payments', 400);
@@ -72,14 +73,20 @@ class PaymentsController {
         if (!validLevels.includes(level)) {
           return ApiResponse.error(res, 'Invalid level selection', 400);
         }
-        if (!isAll && allowed.length > 0 && !allowed.includes(level)) {
-          return ApiResponse.error(res, 'Selected level is not applicable for this fee', 400);
+        const allAllowLevel = fees.every((f) => {
+          const allowed = Array.isArray(f.levels) ? f.levels : [];
+          const isAll = allowed.includes('ALL');
+          return isAll || allowed.includes(level);
+        });
+        if (!allAllowLevel) {
+          return ApiResponse.error(res, 'Selected level is not applicable for one or more chosen fees', 400);
         }
       }
 
-      // Support partial payment: 50% or 100%
+      // Support partial payment: 50% or 100% for single or multiple fees
       const pct = percent && Number(percent) === 50 ? 50 : 100;
-      const amountToCharge = Math.round(Number(fee.amount) * (pct / 100));
+      const totalAmount = fees.reduce((sum, f) => sum + Number(f.amount || 0), 0);
+      const amountToCharge = Math.round(totalAmount * (pct / 100));
 
       const FRONTEND_URL = process.env.FRONTEND_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
       // GlobalPay expects redirect to your verification/callback page; keep base clean
@@ -106,14 +113,16 @@ class PaymentsController {
         gateway,
         amount: amountToCharge,
         email: studentEmail,
-        metadata: { studentName, percent: pct, phoneNumber, address },
+        metadata: { studentName, percent: pct, phoneNumber, address, feeNames: fees.map((f) => f.fee_category) },
         redirectUrl,
       });
 
       const ref = initData.reference;
 
       const created = await this.paymentModel.createPaymentRecord({
-        feeId,
+        feeId: fees[0].fee_id,
+        feeIds: ids,
+        items: fees.map((f) => ({ fee_id: f.fee_id, fee_category: f.fee_category, amount: Number(f.amount || 0) })),
         studentEmail,
         studentName,
         amount: amountToCharge,

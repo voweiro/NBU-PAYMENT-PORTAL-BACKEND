@@ -29,10 +29,10 @@ class PaymentModel extends BaseModel {
     });
   }
 
-  async createPaymentRecord({ feeId, studentEmail, studentName, amount, reference, status = 'pending', jambNumber, matricNumber, level, phoneNumber, address }) {
+  async createPaymentRecord({ feeId, feeIds, items, studentEmail, studentName, amount, reference, status = 'pending', jambNumber, matricNumber, level, phoneNumber, address }) {
     return this.model.create({
       data: {
-        fee_id: Number(feeId),
+        fee_id: Number(feeId ?? (Array.isArray(feeIds) ? Number(feeIds[0]) : undefined)),
         amount_paid: amount,
         transaction_ref: reference,
         status,
@@ -43,6 +43,7 @@ class PaymentModel extends BaseModel {
         level,
         phone_number: phoneNumber,
         address,
+        items,
       },
     });
   }

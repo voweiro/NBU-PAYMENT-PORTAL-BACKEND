@@ -40,20 +40,26 @@ const FeeUpdateSchema = z.object({
 });
 
 const PaymentInitiateSchema = z.object({
-  body: z.object({
-    feeId: z.string(),
-    studentEmail: z.string().email(),
-    studentName: z.string().min(1),
-    gateway: z.enum(['paystack', 'flutterwave', 'global']).default('global'),
-    jambNumber: z.string().min(5).optional(),
-    matricNumber: z.string().min(5).optional(),
-    level: z.enum(['L100', 'L200', 'L300', 'L400', 'L500', 'L600', 'ALL']).optional(),
-    percent: z.number().optional(),
-    // GlobalPay requires numeric 11-digit phone; enforce at schema level
-    phoneNumber: z.string().regex(/^\d{11}$/, 'Phone number must be 11 digits').optional(),
-    // Address recommended > 5 chars per GlobalPay docs
-    address: z.string().min(6, 'Address must be at least 6 characters').optional(),
-  }),
+  body: z
+    .object({
+      feeId: z.string().optional(),
+      feeIds: z.array(z.string()).min(1, 'Select at least one fee').optional(),
+      studentEmail: z.string().email(),
+      studentName: z.string().min(1),
+      gateway: z.enum(['paystack', 'flutterwave', 'global']).default('global'),
+      jambNumber: z.string().min(5).optional(),
+      matricNumber: z.string().min(5).optional(),
+      level: z.enum(['L100', 'L200', 'L300', 'L400', 'L500', 'L600', 'ALL']).optional(),
+      percent: z.number().optional(),
+      // GlobalPay requires numeric 11-digit phone; enforce at schema level
+      phoneNumber: z.string().regex(/^\d{11}$/, 'Phone number must be 11 digits').optional(),
+      // Address recommended > 5 chars per GlobalPay docs
+      address: z.string().min(6, 'Address must be at least 6 characters').optional(),
+    })
+    .refine((data) => Boolean(data.feeId) || (Array.isArray(data.feeIds) && data.feeIds.length > 0), {
+      message: 'Provide either feeId or feeIds',
+      path: ['feeId'],
+    }),
 });
 
 const PaymentVerifySchema = z.object({
