@@ -36,7 +36,7 @@ async function generateQRCode(payment) {
   });
 }
 
-async function generateReceiptPDFBuffer({ payment, fee, program }) {
+async function generateReceiptPDFBuffer({ payment, fee, program, isBalanceSettlement = false }) {
   return new Promise(async (resolve, reject) => {
     try {
       const doc = new PDFDocument({ size: 'A4', margin: 30 });
@@ -159,7 +159,7 @@ async function generateReceiptPDFBuffer({ payment, fee, program }) {
 
       // Student information cards
       const cardY = 270;
-      const cardHeight = 180;
+      const cardHeight = 210; // extend card height to create more vertical space
       
       // Left card - Student Details
       doc.roundedRect(40, cardY, (doc.page.width - 100) / 2, cardHeight, 8).fill(white);
@@ -183,14 +183,36 @@ async function generateReceiptPDFBuffer({ payment, fee, program }) {
       leftY += 35;
 
       doc.fontSize(10).font('Helvetica').text('Fee Category:', leftX, leftY);
-      const feeNamesStr = items && items.length > 0
-        ? items.map((it) => String(it.fee_category || 'Fee')).join(', ')
-        : (fee.fee_category || 'N/A');
-      doc.fontSize(12).font('Helvetica-Bold').text(feeNamesStr, leftX, leftY + 12, { width: 240 });
-      leftY += 35;
+      // Render fee names as responsive chips that wrap nicely
+      const chipStartY = leftY + 8;
+      let chipX = leftX;
+      let chipY = chipStartY + 14;
+      const chipPaddingX = 6;
+      const chipPaddingY = 3;
+      const chipGap = 4;
+      const chipMaxWidth = ((doc.page.width - 100) / 2) - 40; // widen chip row width within card
+
+      const feeNames = (items && items.length > 0)
+        ? items.map((it) => String(it.fee_category || 'Fee')).filter(Boolean)
+        : [String(fee.fee_category || 'N/A')];
+
+      doc.fontSize(10).font('Helvetica-Bold');
+      feeNames.forEach((name) => {
+        const w = doc.widthOfString(name) + chipPaddingX * 2;
+        const h = 14 + chipPaddingY;
+        if (chipX + w > leftX + chipMaxWidth) {
+          chipX = leftX;
+          chipY += h + chipGap;
+        }
+        doc.roundedRect(chipX, chipY, w, h, 5).fill('#ECF0F1');
+        doc.fillColor('#2C3E50').text(name, chipX + chipPaddingX, chipY + chipPaddingY - 1);
+        doc.fillColor(darkGray); // reset
+        chipX += w + chipGap;
+      });
+      leftY = chipY + 28; // push Payment Method further down below chips
 
       doc.fontSize(10).font('Helvetica').text('Payment Method:', leftX, leftY);
-      doc.fontSize(12).font('Helvetica-Bold').fillColor(primaryBlue).text('Online Payment', leftX, leftY + 12);
+      doc.fontSize(11).font('Helvetica-Bold').fillColor(primaryBlue).text('Online Payment', leftX, leftY + 12);
 
       // Right card - Payment Details
       const rightCardX = 40 + (doc.page.width - 100) / 2 + 20;
@@ -220,75 +242,71 @@ async function generateReceiptPDFBuffer({ payment, fee, program }) {
       doc.fillColor(darkGray).fontSize(10).font('Helvetica').text('Generated:', rightX, rightY);
       doc.fontSize(11).font('Helvetica-Bold').text(new Date().toLocaleDateString('en-GB'), rightX, rightY + 12);
 
-      // Multi-fee items table (if available)
+      // Remove fee breakdown table for a cleaner appearance.
+      // Keep space consistent regardless of multi-fee to avoid layout shifts.
       let tableY = 440;
-      if (items && items.length > 0) {
-        doc.fillColor(darkGray).fontSize(12).font('Helvetica-Bold').text('Fees Paid', 40, tableY - 20);
-        // Table header
-        doc.fillColor(lightGray).rect(40, tableY, doc.page.width - 80, 28).fill();
-        doc.fillColor(darkGray).fontSize(11).font('Helvetica-Bold');
-        doc.text('Fee', 50, tableY + 8, { width: 300 });
-        doc.text('Amount (₦)', doc.page.width - 220, tableY + 8, { width: 160, align: 'right' });
-        // Rows
-        doc.fillColor(darkGray).font('Helvetica');
-        let y = tableY + 28;
-        items.forEach((it) => {
-          const cat = String(it.fee_category || 'Fee');
-          const amt = Number(it.amount || 0);
-          doc.text(cat, 50, y + 8, { width: 300 });
-          doc.text(amt.toLocaleString(), doc.page.width - 220, y + 8, { width: 160, align: 'right' });
-          y += 28;
-        });
-        tableY = y + 10;
-      }
 
       // Amount section with modern styling
-      const amountY = Math.max(tableY, 480);
-      doc.roundedRect(40, amountY, doc.page.width - 80, 120, 12).fill(darkGray);
+      // Lift summary section for better visual balance since table was removed
+      // Position payment summary so its bottom edge meets the footer border
+      const footerY = 660; // footer start line
+      const summaryHeight = 110;
+      const amountY = footerY - summaryHeight; // aligns summary bottom with footer
+      doc.roundedRect(40, amountY, doc.page.width - 80, 110, 12).fill(darkGray);
       
       const amountPaid = Number(payment.amount_paid || 0);
       // When multiple fees are present, full amount equals sum of items; otherwise fee.amount
       const fullAmount = items && items.length > 0
         ? items.reduce((sum, it) => sum + Number(it.amount || 0), 0)
         : Number(fee.amount || 0);
-      // Clamp display to 50% or 100% to avoid rounding artifacts
-      const rawPct = fullAmount > 0 ? (amountPaid / fullAmount) * 100 : 0;
-      const percentageDisplay = Math.abs(rawPct - 50) <= 5 ? 50 : 100;
+      // Accurate percentage; prefer stored percentage_paid if available
+      const storedPct = typeof payment.percentage_paid === 'number' || typeof payment.percentage_paid === 'string'
+        ? Number(payment.percentage_paid)
+        : NaN;
+      const computedPct = fullAmount > 0 ? (amountPaid / fullAmount) * 100 : 0;
+      const percentageDisplay = Math.min(100, Math.max(0, Math.round(Number.isFinite(storedPct) ? storedPct : computedPct)));
       
       doc.fillColor(white)
          .fontSize(16)
          .font('Helvetica-Bold')
          .text('PAYMENT SUMMARY', 60, amountY + 20);
 
+      // Balance payment notice when generating receipt after balance settlement
+      if (isBalanceSettlement) {
+        doc.fontSize(10).font('Helvetica').fillColor(white)
+          .text('This is a balance payment. All fees are fully paid; no pending balance.', 60, amountY + 38, { width: doc.page.width - 120 });
+      }
+
+      const baseY = isBalanceSettlement ? amountY + 60 : amountY + 40;
       doc.fontSize(14)
          .font('Helvetica')
-         .text('Total Fee Amount:', 60, amountY + 45);
+         .text('Total Fee Amount:', 60, baseY);
       doc.fontSize(20)
          .font('Helvetica-Bold')
          .fillColor(accentGold)
-         .text(`₦${fullAmount.toLocaleString()}`, doc.page.width - 200, amountY + 40);
+         .text(`₦${fullAmount.toLocaleString()}`, doc.page.width - 200, baseY - 5);
 
       doc.fillColor(white)
          .fontSize(14)
          .font('Helvetica')
-         .text('Amount Paid:', 60, amountY + 70);
+         .text('Amount Paid:', 60, baseY + 25);
       doc.fontSize(20)
          .font('Helvetica-Bold')
          .fillColor('#27AE60')
-         .text(`₦${amountPaid.toLocaleString()}`, doc.page.width - 200, amountY + 65);
+         .text(`₦${amountPaid.toLocaleString()}`, doc.page.width - 200, baseY + 20);
 
       // Percentage paid
       doc.fillColor(white)
          .fontSize(14)
          .font('Helvetica')
-         .text('Percentage Paid:', 60, amountY + 95);
+         .text('Percentage Paid:', 60, baseY + 48);
       doc.fontSize(18)
          .font('Helvetica-Bold')
          .fillColor(percentageDisplay === 100 ? '#27AE60' : '#F39C12')
-         .text(`${percentageDisplay}%`, doc.page.width - 200, amountY + 90);
+         .text(`${percentageDisplay}%`, doc.page.width - 200, baseY + 43);
 
       // Security footer
-      const footerY = 640;
+      // footerY defined above to align summary to border
       doc.rect(0, footerY, doc.page.width, doc.page.height - footerY).fill(lightGray);
       
       // Security pattern in footer
@@ -362,8 +380,8 @@ async function uploadToDrive(buffer, filename) {
   return { fileId, driveUrl };
 }
 
-async function generateAndUploadReceipt({ payment, fee, program }) {
-  const buffer = await generateReceiptPDFBuffer({ payment, fee, program });
+async function generateAndUploadReceipt({ payment, fee, program, isBalanceSettlement = false }) {
+  const buffer = await generateReceiptPDFBuffer({ payment, fee, program, isBalanceSettlement });
   const filename = `NBU-Receipt-${payment.transaction_ref}.pdf`;
   try {
     const { driveUrl } = await uploadToDrive(buffer, filename);

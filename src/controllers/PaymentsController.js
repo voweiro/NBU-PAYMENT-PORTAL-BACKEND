@@ -175,7 +175,7 @@ class PaymentsController {
         try {
           const fee = await this.feeModel.getById(updated.fee_id);
           const program = await this.feeModel.prisma.program.findUnique({ where: { program_id: fee.program_id } });
-          const receipt = await ReceiptService.generateAndUploadReceipt({ payment: updated, fee, program });
+          const receipt = await ReceiptService.generateAndUploadReceipt({ payment: updated, fee, program, isBalanceSettlement: true });
           if (receipt.driveUrl) {
             await this.paymentModel.setReceiptUrlById(updated.payment_id, receipt.driveUrl);
           }
@@ -320,7 +320,7 @@ class PaymentsController {
               try {
                 const fee = await this.feeModel.getById(updatedOriginal.fee_id);
                 const program = await this.feeModel.prisma.program.findUnique({ where: { program_id: fee.program_id } });
-                const receipt = await ReceiptService.generateAndUploadReceipt({ payment: updatedOriginal, fee, program });
+                const receipt = await ReceiptService.generateAndUploadReceipt({ payment: updatedOriginal, fee, program, isBalanceSettlement: true });
                 if (receipt.driveUrl) {
                   await this.paymentModel.setReceiptUrlById(updatedOriginal.payment_id, receipt.driveUrl);
                 }
@@ -355,7 +355,7 @@ class PaymentsController {
           try {
             const fee = await this.feeModel.getById(payment.fee_id);
             const program = await this.feeModel.prisma.program.findUnique({ where: { program_id: fee.program_id } });
-            const receipt = await ReceiptService.generateAndUploadReceipt({ payment, fee, program });
+            const receipt = await ReceiptService.generateAndUploadReceipt({ payment, fee, program, isBalanceSettlement: false });
             if (receipt.driveUrl) {
               await this.paymentModel.setReceiptUrlById(payment.payment_id, receipt.driveUrl);
             }
