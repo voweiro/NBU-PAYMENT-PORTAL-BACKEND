@@ -49,6 +49,121 @@ class PaymentsController {
     }
   }
 
+  async getBalanceByRef(req, res) {
+    try {
+      const { reference } = req.params;
+      const payment = await this.paymentModel.getByRef(reference);
+      if (!payment) return ApiResponse.error(res, 'Payment not found', 404);
+
+      // Compute total from items or single fee
+      let totalAmount = 0;
+      if (Array.isArray(payment.items) && payment.items.length > 0) {
+        totalAmount = payment.items.reduce((sum, it) => sum + Number(it.amount || 0), 0);
+      } else {
+        const fee = await this.feeModel.getById(payment.fee_id);
+        totalAmount = Number(fee?.amount || 0);
+      }
+
+      const amountPaid = Number(payment.amount_paid || 0);
+      const balanceDue = typeof payment.balance_due === 'string' || typeof payment.balance_due === 'number'
+        ? Number(payment.balance_due)
+        : Math.max(0, totalAmount - amountPaid);
+      const pct = typeof payment.percentage_paid === 'string' || typeof payment.percentage_paid === 'number'
+        ? Number(payment.percentage_paid)
+        : (totalAmount > 0 ? Math.min(100, Math.max(0, (amountPaid / totalAmount) * 100)) : 0);
+
+      return ApiResponse.ok(res, {
+        payment_id: payment.payment_id,
+        transaction_ref: payment.transaction_ref,
+        status: payment.status,
+        total_amount: totalAmount,
+        amount_paid: amountPaid,
+        balance_due: Number(balanceDue.toFixed(2)),
+        percentage_paid: Number(pct.toFixed(2)),
+        student_email: payment.student_email,
+        student_name: payment.student_name ?? null,
+        items: payment.items || null,
+      });
+    } catch (err) {
+      return ApiResponse.error(res, err);
+    }
+  }
+
+  async initiateBalance(req, res) {
+    try {
+      const { reference, gateway = 'global' } = (req.validated && req.validated.body) || req.body;
+      const payment = await this.paymentModel.getByRef(reference);
+      if (!payment) return ApiResponse.error(res, 'Payment not found', 404);
+
+      // Compute remaining balance
+      let totalAmount = 0;
+      if (Array.isArray(payment.items) && payment.items.length > 0) {
+        totalAmount = payment.items.reduce((sum, it) => sum + Number(it.amount || 0), 0);
+      } else {
+        const fee = await this.feeModel.getById(payment.fee_id);
+        totalAmount = Number(fee?.amount || 0);
+      }
+      const amountPaid = Number(payment.amount_paid || 0);
+      const remaining = Math.max(0, totalAmount - amountPaid);
+      if (remaining <= 0) return ApiResponse.error(res, 'Payment already fully paid', 400);
+
+      const FRONTEND_URL = process.env.FRONTEND_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+      const redirectUrl = `${FRONTEND_URL}/payment/callback`;
+
+      const initData = await PaymentGateway.initiatePayment({
+        gateway,
+        amount: Math.round(remaining),
+        email: payment.student_email,
+        metadata: {
+          studentName: payment.student_name,
+          balancePayment: true,
+          balanceAmount: remaining,
+          feeNames: Array.isArray(payment.items) && payment.items.length > 0 ? payment.items.map((i) => i.fee_category) : undefined,
+        },
+        redirectUrl,
+      });
+
+      // We do not create a new record; we keep existing and reuse verification path
+      return ApiResponse.ok(res, { reference: payment.transaction_ref, paymentId: payment.payment_id, ...initData });
+    } catch (err) {
+      return ApiResponse.error(res, err);
+    }
+  }
+
+  async processBalance(req, res) {
+    try {
+      const { reference, amount } = (req.validated && req.validated.body) || req.body;
+      const updated = await this.paymentModel.updateBalanceByRef(reference, amount);
+
+      // If fully paid now, generate receipt
+      if (updated.status === 'successful') {
+        try {
+          const fee = await this.feeModel.getById(updated.fee_id);
+          const program = await this.feeModel.prisma.program.findUnique({ where: { program_id: fee.program_id } });
+          const receipt = await ReceiptService.generateAndUploadReceipt({ payment: updated, fee, program });
+          if (receipt.driveUrl) {
+            await this.paymentModel.setReceiptUrlById(updated.payment_id, receipt.driveUrl);
+          }
+        } catch (genErr) {
+          console.error('Receipt generation on balance completion failed:', genErr?.message || genErr);
+        }
+      }
+
+      return ApiResponse.ok(res, {
+        payment_id: updated.payment_id,
+        transaction_ref: updated.transaction_ref,
+        status: updated.status,
+        total_amount: (Array.isArray(updated.items) && updated.items.length > 0)
+          ? updated.items.reduce((sum, it) => sum + Number(it.amount || 0), 0)
+          : undefined,
+        amount_paid: Number(updated.amount_paid),
+        balance_due: Number(updated.balance_due || 0),
+        percentage_paid: Number(updated.percentage_paid || 0),
+      });
+    } catch (err) {
+      return ApiResponse.error(res, err);
+    }
+  }
   async initiate(req, res) {
     try {
       const { feeId, feeIds, studentEmail, studentName, gateway = 'global', jambNumber, matricNumber, percent, level, phoneNumber, address } = req.validated.body || req.body;

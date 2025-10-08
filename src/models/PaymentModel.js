@@ -55,6 +55,41 @@ class PaymentModel extends BaseModel {
   async setReceiptUrlById(id, url) {
     return this.model.update({ where: { payment_id: Number(id) }, data: { receipt_drive_url: url } });
   }
+
+  async updateBalanceByRef(reference, amountToAdd) {
+    const payment = await this.getByRef(reference);
+    if (!payment) throw new Error('Payment not found');
+
+    // Determine total amount from items sum or single fee amount
+    let totalAmount = 0;
+    if (Array.isArray(payment.items) && payment.items.length > 0) {
+      totalAmount = payment.items.reduce((sum, it) => sum + Number(it.amount || 0), 0);
+    } else {
+      const fee = await this.prisma.fee.findUnique({ where: { fee_id: payment.fee_id } });
+      totalAmount = Number(fee?.amount || 0);
+    }
+
+    const currentPaid = Number(payment.amount_paid || 0);
+    const add = Number(amountToAdd || 0);
+    if (add <= 0) throw new Error('Amount to add must be positive');
+    if (add > Math.max(0, totalAmount - currentPaid)) throw new Error('Amount exceeds remaining balance');
+
+    const newPaid = currentPaid + add;
+    const newBalance = Math.max(0, totalAmount - newPaid);
+    const pct = totalAmount > 0 ? Math.min(100, Math.max(0, (newPaid / totalAmount) * 100)) : 0;
+
+    const status = newBalance <= 0 ? 'successful' : 'pending';
+
+    return this.model.update({
+      where: { transaction_ref: reference },
+      data: {
+        amount_paid: newPaid,
+        balance_due: newBalance,
+        percentage_paid: Number(pct.toFixed(2)),
+        status,
+      },
+    });
+  }
 }
 
 module.exports = PaymentModel;

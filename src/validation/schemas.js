@@ -67,6 +67,20 @@ const PaymentVerifySchema = z.object({
   query: z.object({ gateway: z.enum(['paystack', 'flutterwave', 'global']) }),
 });
 
+const BalanceInitiateSchema = z.object({
+  body: z.object({
+    reference: z.string().min(3),
+    gateway: z.enum(['paystack', 'flutterwave', 'global']).default('global'),
+  }),
+});
+
+const BalanceProcessSchema = z.object({
+  body: z.object({
+    reference: z.string().min(3),
+    amount: z.number().positive(),
+  }),
+});
+
 const AdminLoginSchema = z.object({
   body: z.object({
     email: z.string().email(),
@@ -100,6 +114,8 @@ module.exports = {
   FeeUpdateSchema,
   PaymentInitiateSchema,
   PaymentVerifySchema,
+  BalanceInitiateSchema,
+  BalanceProcessSchema,
   AdminLoginSchema,
   AdminCreateSchema,
   AdminUpdateSchema,

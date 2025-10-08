@@ -69,6 +69,8 @@ model Payment {
   fee_id            Int
   fee               Fee           @relation(fields: [fee_id], references: [fee_id])
   amount_paid       Decimal       @db.Decimal(14, 2)
+  percentage_paid   Decimal?      @db.Decimal(5, 2)
+  balance_due       Decimal?      @db.Decimal(14, 2)
   transaction_ref   String        @unique
   status            PaymentStatus
   payment_date      DateTime      @default(now())
@@ -80,6 +82,5 @@ model Payment {
   level             Level?
   phone_number      String?
   address           String?
-  // Optional JSON storing multi-fee items: [{ fee_id, fee_category, amount }]
   items             Json?
 }
