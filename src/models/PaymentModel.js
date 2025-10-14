@@ -30,10 +30,32 @@ class PaymentModel extends BaseModel {
   }
 
   async createPaymentRecord({ feeId, feeIds, items, studentEmail, studentName, amount, reference, status = 'pending', jambNumber, matricNumber, level, phoneNumber, address, originalReference }) {
+    // Calculate percentage_paid and balance_due
+    let totalAmount = 0;
+    let percentagePaid = 0;
+    let balanceDue = 0;
+
+    if (Array.isArray(items) && items.length > 0) {
+      // Multi-fee payment: calculate from items
+      totalAmount = items.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    } else if (feeId) {
+      // Single fee payment: get fee amount
+      const fee = await this.prisma.fee.findUnique({ where: { fee_id: Number(feeId) } });
+      totalAmount = Number(fee?.amount || 0);
+    }
+
+    if (totalAmount > 0) {
+      const amountPaid = Number(amount || 0);
+      percentagePaid = Math.min(100, Math.max(0, (amountPaid / totalAmount) * 100));
+      balanceDue = Math.max(0, totalAmount - amountPaid);
+    }
+
     return this.model.create({
       data: {
         fee_id: Number(feeId ?? (Array.isArray(feeIds) ? Number(feeIds[0]) : undefined)),
         amount_paid: amount,
+        percentage_paid: Number(percentagePaid.toFixed(2)),
+        balance_due: balanceDue,
         transaction_ref: reference,
         status,
         student_email: studentEmail,
