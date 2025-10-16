@@ -59,9 +59,32 @@ class FeesController {
   async remove(req, res) {
     try {
       const { id } = req.params;
-      await this.feeModel.delete(Number(id));
-      return ApiResponse.ok(res, { id });
+      const feeId = Number(id);
+
+      // Check if there are any payments associated with this fee
+      const hasPayments = await this.feeModel.prisma.payment.findFirst({ 
+        where: { fee_id: feeId } 
+      });
+      
+      if (hasPayments) {
+        return ApiResponse.error(
+          res, 
+          'Cannot delete fee while payments exist. This fee has associated payment records that must be handled first.', 
+          400
+        );
+      }
+
+      await this.feeModel.delete(feeId);
+      return ApiResponse.ok(res, { id: feeId });
     } catch (err) {
+      // Handle foreign key constraint violation gracefully
+      if (err && err.code === 'P2003') {
+        return ApiResponse.error(
+          res,
+          'Fee is referenced by payment records. Cannot delete fee with existing payments.',
+          400
+        );
+      }
       return ApiResponse.error(res, err);
     }
   }
