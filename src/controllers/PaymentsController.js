@@ -1,6 +1,7 @@
 const ApiResponse = require('../utils/apiResponse');
 const PaymentGateway = require('../services/paymentGateway');
 const ReceiptService = require('../services/receiptService');
+const { buildReceiptEmail } = require('../services/emailTemplates');
 
 class PaymentsController {
   constructor(paymentModel, feeModel, emailService) {
@@ -326,10 +327,18 @@ class PaymentsController {
                 }
 
                 if (this.emailService) {
+                  const { subject, html } = await buildReceiptEmail({
+                    payment: updatedOriginal,
+                    fee,
+                    program,
+                    receiptDriveUrl: receipt.driveUrl,
+                    isBalanceSettlement: true,
+                  });
                   await this.emailService.sendMail({
                     to: updatedOriginal.student_email,
-                    subject: 'Payment Receipt',
+                    subject,
                     text: 'Your payment was successful. Receipt attached.',
+                    html,
                     attachments: [
                       {
                         filename: receipt.filename,
@@ -361,10 +370,18 @@ class PaymentsController {
             }
 
             if (this.emailService) {
+              const { subject, html } = await buildReceiptEmail({
+                payment,
+                fee,
+                program,
+                receiptDriveUrl: receipt.driveUrl,
+                isBalanceSettlement: false,
+              });
               await this.emailService.sendMail({
                 to: payment.student_email,
-                subject: 'Payment Receipt',
+                subject,
                 text: 'Your payment was successful. Receipt attached.',
+                html,
                 attachments: [
                   {
                     filename: receipt.filename,
