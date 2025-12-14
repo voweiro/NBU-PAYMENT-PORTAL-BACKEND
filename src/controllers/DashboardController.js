@@ -7,10 +7,38 @@ class DashboardController {
 
   async getAnalytics(req, res) {
     try {
-      // Get current date and previous month for comparison
+      // Get range from query params (default to 'month')
+      const { range } = req.query;
       const now = new Date();
-      const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-      const previousMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      
+      let currentPeriodStart, previousPeriodStart, previousPeriodEnd;
+      const currentDay = now.getDate();
+
+      switch(range) {
+        case 'today':
+          currentPeriodStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          previousPeriodStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+          previousPeriodEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59);
+          break;
+        case 'week':
+          const dayOfWeek = now.getDay(); // 0 is Sunday
+          currentPeriodStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek);
+          previousPeriodStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek - 7);
+          previousPeriodEnd = new Date(previousPeriodStart.getTime() + (now.getTime() - currentPeriodStart.getTime()));
+          break;
+        case 'year':
+          currentPeriodStart = new Date(now.getFullYear(), 0, 1);
+          previousPeriodStart = new Date(now.getFullYear() - 1, 0, 1);
+          previousPeriodEnd = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate(), now.getHours(), now.getMinutes());
+          break;
+        case 'month':
+        default:
+          currentPeriodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+          previousPeriodStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+          previousPeriodEnd = new Date(now.getFullYear(), now.getMonth() - 1, currentDay, 23, 59, 59);
+          break;
+      }
+
       const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 6, 1);
 
       // Get all payments
@@ -18,12 +46,15 @@ class DashboardController {
       const successfulPayments = allPayments.filter(p => p.status === 'successful');
       const pendingPayments = allPayments.filter(p => p.status === 'pending');
 
-      // Current month stats
-      const currentMonthPayments = successfulPayments.filter(p => 
-        new Date(p.payment_date) >= currentMonth
+      // Current Period stats
+      const currentPeriodPayments = successfulPayments.filter(p => 
+        new Date(p.payment_date) >= currentPeriodStart
       );
-      const previousMonthPayments = successfulPayments.filter(p => 
-        new Date(p.payment_date) >= previousMonth && new Date(p.payment_date) < currentMonth
+      
+      // Previous Period stats (for trend)
+      const previousPeriodPayments = successfulPayments.filter(p => 
+        new Date(p.payment_date) >= previousPeriodStart &&
+        new Date(p.payment_date) <= previousPeriodEnd
       );
 
       // Calculate totals
@@ -31,39 +62,27 @@ class DashboardController {
       const totalPayments = successfulPayments.length;
       const totalPending = pendingPayments.length;
 
-      const currentMonthRevenue = currentMonthPayments.reduce((sum, p) => sum + Number(p.amount_paid), 0);
-      // const previousMonthRevenue = previousMonthPayments.reduce((sum, p) => sum + Number(p.amount_paid), 0); // Previous Full Month
+      const currentPeriodRevenue = currentPeriodPayments.reduce((sum, p) => sum + Number(p.amount_paid), 0);
+      const previousPeriodRevenue = previousPeriodPayments.reduce((sum, p) => sum + Number(p.amount_paid), 0);
 
-      // Previous Month-to-Date (MTD) for fair comparison
-      // const now is already declared above
-      const currentDay = now.getDate();
-      const previousMonthMTDLimit = new Date(now.getFullYear(), now.getMonth() - 1, currentDay, 23, 59, 59);
-
-      const previousMonthMTDPayments = previousMonthPayments.filter(p => 
-        new Date(p.payment_date) <= previousMonthMTDLimit
-      );
-      
-      const previousMonthMTDRevenue = previousMonthMTDPayments.reduce((sum, p) => sum + Number(p.amount_paid), 0);
-
-      // Calculate percentage changes (MTD vs MTD)
-      const revenueChange = previousMonthMTDRevenue > 0 
-        ? ((currentMonthRevenue - previousMonthMTDRevenue) / previousMonthMTDRevenue) * 100 
-        : currentMonthRevenue > 0 ? 100 : 0;
+      // Calculate percentage changes
+      const revenueChange = previousPeriodRevenue > 0 
+        ? ((currentPeriodRevenue - previousPeriodRevenue) / previousPeriodRevenue) * 100 
+        : currentPeriodRevenue > 0 ? 100 : 0;
         
-      const paymentsChange = previousMonthMTDPayments.length > 0 
-        ? ((currentMonthPayments.length - previousMonthMTDPayments.length) / previousMonthMTDPayments.length) * 100 
-        : currentMonthPayments.length > 0 ? 100 : 0;
+      const paymentsChange = previousPeriodPayments.length > 0 
+        ? ((currentPeriodPayments.length - previousPeriodPayments.length) / previousPeriodPayments.length) * 100 
+        : currentPeriodPayments.length > 0 ? 100 : 0;
 
-      // Get previous month pending count for comparison (MTD)
-      const previousMonthPending = allPayments.filter(p => 
+      // Get previous period pending count for comparison
+      const previousPeriodPending = allPayments.filter(p => 
         p.status === 'pending' && 
-        new Date(p.created_at) >= previousMonth && 
-        new Date(p.created_at) < previousMonthMTDLimit  // Changed to MTD comparison
+        new Date(p.created_at) >= previousPeriodStart && 
+        new Date(p.created_at) <= previousPeriodEnd
       ).length;
       
-      // For pending: If current is lower, that's usually "good", but "change" is just mathematical delta
-      const pendingChange = previousMonthPending > 0 
-        ? ((totalPending - previousMonthPending) / previousMonthPending) * 100 
+      const pendingChange = previousPeriodPending > 0 
+        ? ((totalPending - previousPeriodPending) / previousPeriodPending) * 100 
         : 0;
 
       // Generate revenue chart data (last 6 months)
