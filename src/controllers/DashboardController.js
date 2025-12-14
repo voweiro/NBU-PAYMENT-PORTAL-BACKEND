@@ -32,22 +32,36 @@ class DashboardController {
       const totalPending = pendingPayments.length;
 
       const currentMonthRevenue = currentMonthPayments.reduce((sum, p) => sum + Number(p.amount_paid), 0);
-      const previousMonthRevenue = previousMonthPayments.reduce((sum, p) => sum + Number(p.amount_paid), 0);
+      // const previousMonthRevenue = previousMonthPayments.reduce((sum, p) => sum + Number(p.amount_paid), 0); // Previous Full Month
 
-      // Calculate percentage changes
-      const revenueChange = previousMonthRevenue > 0 
-        ? ((currentMonthRevenue - previousMonthRevenue) / previousMonthRevenue) * 100 
-        : 0;
-      const paymentsChange = previousMonthPayments.length > 0 
-        ? ((currentMonthPayments.length - previousMonthPayments.length) / previousMonthPayments.length) * 100 
-        : 0;
+      // Previous Month-to-Date (MTD) for fair comparison
+      // const now is already declared above
+      const currentDay = now.getDate();
+      const previousMonthMTDLimit = new Date(now.getFullYear(), now.getMonth() - 1, currentDay, 23, 59, 59);
 
-      // Get previous month pending count for comparison
+      const previousMonthMTDPayments = previousMonthPayments.filter(p => 
+        new Date(p.payment_date) <= previousMonthMTDLimit
+      );
+      
+      const previousMonthMTDRevenue = previousMonthMTDPayments.reduce((sum, p) => sum + Number(p.amount_paid), 0);
+
+      // Calculate percentage changes (MTD vs MTD)
+      const revenueChange = previousMonthMTDRevenue > 0 
+        ? ((currentMonthRevenue - previousMonthMTDRevenue) / previousMonthMTDRevenue) * 100 
+        : currentMonthRevenue > 0 ? 100 : 0;
+        
+      const paymentsChange = previousMonthMTDPayments.length > 0 
+        ? ((currentMonthPayments.length - previousMonthMTDPayments.length) / previousMonthMTDPayments.length) * 100 
+        : currentMonthPayments.length > 0 ? 100 : 0;
+
+      // Get previous month pending count for comparison (MTD)
       const previousMonthPending = allPayments.filter(p => 
         p.status === 'pending' && 
-        new Date(p.payment_date) >= previousMonth && 
-        new Date(p.payment_date) < currentMonth
+        new Date(p.created_at) >= previousMonth && 
+        new Date(p.created_at) < previousMonthMTDLimit  // Changed to MTD comparison
       ).length;
+      
+      // For pending: If current is lower, that's usually "good", but "change" is just mathematical delta
       const pendingChange = previousMonthPending > 0 
         ? ((totalPending - previousMonthPending) / previousMonthPending) * 100 
         : 0;
