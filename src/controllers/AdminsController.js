@@ -34,6 +34,7 @@ class AdminsController {
     }
   }
 
+
   async list(req, res) {
     try {
       const admins = await this.adminModel.list();
@@ -43,11 +44,39 @@ class AdminsController {
     }
   }
 
+  async update(req, res) {
+    try {
+      const { id } = req.params;
+      const data = req.validated?.body || req.body;
+      
+      // Prevent updating password directly through this endpoint if not intended
+      // or handle password hashing if password is provided
+      if (data.password) {
+        data.password = await bcrypt.hash(data.password, 10);
+      }
+
+      const admin = await this.adminModel.update(Number(id), data);
+      // Exclude password from response
+      const { password, ...adminWithoutPassword } = admin;
+      return ApiResponse.ok(res, adminWithoutPassword);
+    } catch (err) {
+      return ApiResponse.error(res, err);
+    }
+  }
+
   async remove(req, res) {
     try {
       const { id } = req.params;
-      await this.adminModel.delete(Number(id));
-      return ApiResponse.ok(res, { id });
+      const adminId = Number(id);
+
+      // Prevent self-deletion
+      // req.user is populated by authenticateJWT middleware
+      if (req.user && req.user.id === adminId) {
+        return ApiResponse.error(res, 'Cannot delete your own account', 403);
+      }
+
+      await this.adminModel.delete(adminId);
+      return ApiResponse.ok(res, { id: adminId });
     } catch (err) {
       return ApiResponse.error(res, err);
     }

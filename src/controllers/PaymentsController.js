@@ -297,21 +297,33 @@ class PaymentsController {
     try {
       const { reference } = req.params;
       const { gateway, original_reference } = req.validated.query || req.query;
-      // Use original_reference to locate the existing record when verifying a balance payment
+      // Attempt to find the payment using original_reference first, then the provided reference
       const lookupRef = original_reference || reference;
-      const payment = await this.paymentModel.getByRef(lookupRef);
-      if (!payment) return ApiResponse.error(res, 'Payment not found', 404);
+      let payment = await this.paymentModel.getByRef(lookupRef);
+      // Don't fail early; GlobalPay may pass provider ref, while our DB stores merchant ref
 
       const verifyData = await PaymentGateway.verifyPayment({ gateway, reference });
 
-      const status = verifyData.verified ? 'successful' : 'failed';
+      // Map provider status to our statuses
+      const provider = String(verifyData.paymentStatus || '').toLowerCase();
+      const status = provider === 'success'
+        ? 'successful'
+        : ['failed', 'declined', 'reversed', 'cancelled', 'canceled'].includes(provider)
+          ? 'failed'
+          : 'pending';
       if (original_reference) {
         // Balance payment flow: mark the new balance record by its own gateway reference
-        await this.paymentModel.updateStatusByRef(reference, status);
+        const balanceUpdateRef = verifyData.merchantRef || reference;
+        try {
+          await this.paymentModel.updateStatusByRef(balanceUpdateRef, status);
+        } catch (e) {
+          // As a fallback, try updating by the path reference
+          await this.paymentModel.updateStatusByRef(reference, status);
+        }
 
         if (status === 'successful') {
           // Aggregate the balance payment amount into the original record
-          const balanceRecord = await this.paymentModel.getByRef(reference);
+          const balanceRecord = await this.paymentModel.getByRef(verifyData.merchantRef || reference);
           const addAmount = Number(balanceRecord?.amount_paid || 0);
           try {
             const updatedOriginal = await this.paymentModel.updateBalanceByRef(original_reference, addAmount);
@@ -358,10 +370,18 @@ class PaymentsController {
         }
       } else {
         // Normal payment flow: mark the original record by its own reference
-        await this.paymentModel.updateStatusByRef(lookupRef, status);
+        const normalUpdateRef = verifyData.merchantRef || lookupRef;
+        await this.paymentModel.updateStatusByRef(normalUpdateRef, status);
 
         if (status === 'successful') {
           try {
+            // Ensure we have the correct payment record using merchantRef, if available
+            if (!payment || payment.transaction_ref !== normalUpdateRef) {
+              payment = await this.paymentModel.getByRef(normalUpdateRef);
+            }
+            if (!payment) {
+              return ApiResponse.error(res, 'Payment not found after verification', 404);
+            }
             const fee = await this.feeModel.getById(payment.fee_id);
             const program = await this.feeModel.prisma.program.findUnique({ where: { program_id: fee.program_id } });
             const receipt = await ReceiptService.generateAndUploadReceipt({ payment, fee, program, isBalanceSettlement: false });
@@ -397,7 +417,9 @@ class PaymentsController {
         }
       }
 
-      return ApiResponse.ok(res, { reference: lookupRef, status, paymentId: payment.payment_id, verifyData });
+      const finalRef = original_reference ? (verifyData.merchantRef || reference) : (verifyData.merchantRef || lookupRef);
+      const finalPayment = await this.paymentModel.getByRef(finalRef).catch(() => null);
+      return ApiResponse.ok(res, { reference: finalRef, status, paymentId: finalPayment?.payment_id, verifyData });
     } catch (err) {
       return ApiResponse.error(res, err);
     }

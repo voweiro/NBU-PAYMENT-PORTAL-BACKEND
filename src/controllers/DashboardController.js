@@ -75,7 +75,7 @@ class DashboardController {
         const monthStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
         const monthEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
         const monthPayments = successfulPayments.filter(p => {
-          const paymentDate = new Date(p.created_at);
+          const paymentDate = new Date(p.payment_date);
           return paymentDate >= monthStart && paymentDate < monthEnd;
         });
         
