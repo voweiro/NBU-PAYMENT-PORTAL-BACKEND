@@ -62,6 +62,26 @@ const PaymentInitiateSchema = z.object({
     }),
 });
 
+const PaymentManualSchema = z.object({
+  body: z.object({
+    fee_id: z.string().optional(),
+    feeIds: z.array(z.string()).optional(),
+    items: z.array(z.any()).optional(),
+    student_email: z.string().email(),
+    student_name: z.string().min(1),
+    amount_paid: z.number().positive(),
+    jamb_number: z.string().optional(),
+    matric_number: z.string().optional(),
+    level: LevelEnum.optional(),
+    phone_number: z.string().optional(),
+    address: z.string().optional(),
+    is_balance_payment: z.boolean().optional(),
+  }).refine((data) => Boolean(data.fee_id) || (Array.isArray(data.items) && data.items.length > 0) || (Array.isArray(data.feeIds) && data.feeIds.length > 0), {
+    message: 'Provide fee_id, feeIds, or items',
+    path: ['fee_id'],
+  }),
+});
+
 const PaymentVerifySchema = z.object({
   params: z.object({ reference: z.string().min(3) }),
   query: z.object({
@@ -120,6 +140,7 @@ module.exports = {
   FeeUpdateSchema,
   PaymentInitiateSchema,
   PaymentVerifySchema,
+  PaymentManualSchema,
   BalanceInitiateSchema,
   BalanceProcessSchema,
   AdminLoginSchema,

@@ -18,7 +18,8 @@ class DashboardController {
         case 'today':
           currentPeriodStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
           previousPeriodStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-          previousPeriodEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59);
+          // Compare vs Yesterday same time
+          previousPeriodEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, now.getHours(), now.getMinutes());
           break;
         case 'week':
           const dayOfWeek = now.getDay(); // 0 is Sunday

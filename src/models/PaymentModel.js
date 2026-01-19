@@ -29,7 +29,7 @@ class PaymentModel extends BaseModel {
     });
   }
 
-  async createPaymentRecord({ feeId, feeIds, items, studentEmail, studentName, amount, reference, status = 'pending', jambNumber, matricNumber, level, phoneNumber, address, originalReference }) {
+  async createPaymentRecord({ feeId, feeIds, items, studentEmail, studentName, amount, reference, status = 'pending', jambNumber, matricNumber, level, phoneNumber, address, originalReference, isManual = false, recordedBy = null, isBalancePayment = false }) {
     // Calculate percentage_paid and balance_due
     let totalAmount = 0;
     let percentagePaid = 0;
@@ -67,6 +67,9 @@ class PaymentModel extends BaseModel {
         address,
         items,
         original_reference: originalReference,
+        is_manual: isManual,
+        recorded_by: recordedBy,
+        is_balance_payment: isBalancePayment,
       },
     });
   }

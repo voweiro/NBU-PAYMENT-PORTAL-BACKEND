@@ -21,9 +21,15 @@ class PaymentsController {
         transaction_ref: payment.transaction_ref,
         status: payment.status,
         amount_paid: payment.amount_paid,
+        balance_due: payment.balance_due,
+        percentage_paid: payment.percentage_paid,
+        items: payment.items,
         receipt_drive_url: payment.receipt_drive_url ?? null,
         student_email: payment.student_email,
         student_name: payment.student_name ?? null,
+        fee_id: payment.fee_id,
+        phone_number: payment.phone_number,
+        address: payment.address,
       });
     } catch (err) {
       return ApiResponse.error(res, err);
@@ -293,6 +299,89 @@ class PaymentsController {
     }
   }
 
+  async manualEntry(req, res) {
+    try {
+      const { fee_id, feeIds, items, student_email, student_name, amount_paid, jamb_number, matric_number, level, phone_number, address, is_balance_payment } = (req.validated && req.validated.body) || req.body;
+      const adminId = req.user?.id || req.user?.admin_id;
+      if (!adminId) return ApiResponse.error(res, 'Unauthorized: Admin ID missing', 401);
+
+      // Resolve items/fees
+      let resolvedItems = items;
+      let primaryFeeId = fee_id;
+
+      if (!resolvedItems || resolvedItems.length === 0) {
+        const ids = Array.isArray(feeIds) && feeIds.length > 0 ? feeIds.map((id) => Number(id)) : (fee_id ? [Number(fee_id)] : []);
+        if (ids.length > 0) {
+           const fees = await this.feeModel.prisma.fee.findMany({ where: { fee_id: { in: ids } } });
+           resolvedItems = fees.map(f => ({ fee_id: f.fee_id, fee_category: f.fee_category, amount: Number(f.amount || 0) }));
+           if (!primaryFeeId && ids.length > 0) primaryFeeId = ids[0];
+        }
+      }
+      
+      const reference = `MANUAL_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+
+      const payment = await this.paymentModel.createPaymentRecord({
+        feeId: primaryFeeId,
+        items: resolvedItems,
+        studentEmail: student_email,
+        studentName: student_name,
+        amount: amount_paid,
+        reference,
+        status: 'successful',
+        jambNumber: jamb_number,
+        matricNumber: matric_number,
+        level,
+        phoneNumber: phone_number,
+        address,
+        isManual: true,
+        recordedBy: adminId,
+        isBalancePayment: !!is_balance_payment
+      });
+
+      // Audit Log
+      await this.paymentModel.prisma.auditLog.create({
+        data: {
+          admin_id: adminId,
+          action: 'MANUAL_PAYMENT',
+          details: {
+            payment_id: payment.payment_id,
+            transaction_ref: reference,
+            amount: amount_paid,
+            student_email,
+            is_balance_payment: !!is_balance_payment
+          },
+          ip_address: req.ip || req.socket.remoteAddress
+        }
+      });
+
+      // Generate Receipt
+      try {
+        let fee = null;
+        let program = null;
+        if (primaryFeeId) {
+           fee = await this.feeModel.getById(primaryFeeId);
+           if (fee) {
+             program = await this.feeModel.prisma.program.findUnique({ where: { program_id: fee.program_id } });
+           }
+        }
+        
+        if (fee && program) {
+            const receipt = await ReceiptService.generateAndUploadReceipt({ payment, fee, program, isBalanceSettlement: !!is_balance_payment });
+            if (receipt.driveUrl) {
+                await this.paymentModel.setReceiptUrlById(payment.payment_id, receipt.driveUrl);
+                payment.receipt_drive_url = receipt.driveUrl;
+            }
+        }
+      } catch (rErr) {
+        console.error('Manual payment receipt generation failed:', rErr);
+      }
+
+      return ApiResponse.ok(res, payment, 201);
+    } catch (err) {
+      return ApiResponse.error(res, err);
+    }
+  }
+
   async verify(req, res) {
     try {
       const { reference } = req.params;
@@ -304,13 +393,12 @@ class PaymentsController {
 
       const verifyData = await PaymentGateway.verifyPayment({ gateway, reference });
 
-      // Map provider status to our statuses
       const provider = String(verifyData.paymentStatus || '').toLowerCase();
-      const status = provider === 'success'
-        ? 'successful'
-        : ['failed', 'declined', 'reversed', 'cancelled', 'canceled'].includes(provider)
-          ? 'failed'
-          : 'pending';
+      const successVals = ['success', 'successful'];
+      const failVals = ['failed', 'declined', 'reversed', 'cancelled', 'canceled'];
+      const isSuccess = successVals.includes(provider);
+      const isFail = failVals.includes(provider);
+      const status = isSuccess ? 'successful' : isFail ? 'failed' : 'pending';
       if (original_reference) {
         // Balance payment flow: mark the new balance record by its own gateway reference
         const balanceUpdateRef = verifyData.merchantRef || reference;

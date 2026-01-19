@@ -1,5 +1,6 @@
 const app = require('./app');
 const { verifyDriveConnection } = require('./services/receiptService');
+const { startReconciliation } = require('./services/reconciliationService');
 const { PrismaClient } = require('@prisma/client');
 
 const PORT = process.env.PORT || 4000;
@@ -19,6 +20,7 @@ async function start() {
   app.listen(PORT, () => {
     console.log(`Backend server listening on port ${PORT}`);
   });
+  startReconciliation({ intervalMs: 60 * 1000 });
 }
 
 start();

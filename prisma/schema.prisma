@@ -1,13 +1,78 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-generator client {
-  provider = "prisma-client-js"
+model Program {
+  program_id   Int         @id @default(autoincrement())
+  program_name String
+  program_type ProgramType
+  fees         Fee[]
 }
 
-// Undergraduate study levels
+model Fee {
+  fee_id       Int       @id @default(autoincrement())
+  program_id   Int
+  fee_category String
+  amount       Decimal   @db.Decimal(14, 2)
+  session      String?
+  semester     String?
+  levels       Level[]   @default([])
+  program      Program   @relation(fields: [program_id], references: [program_id])
+  payments     Payment[]
+}
+
+model Admin {
+  admin_id   Int       @id @default(autoincrement())
+  name       String
+  email      String    @unique
+  password   String
+  role       AdminRole @default(admin)
+  created_at DateTime  @default(now())
+  audit_logs AuditLog[]
+  recorded_payments Payment[]
+}
+
+model AuditLog {
+  id          Int      @id @default(autoincrement())
+  admin_id    Int
+  admin       Admin    @relation(fields: [admin_id], references: [admin_id])
+  action      String
+  details     Json?
+  ip_address  String?
+  created_at  DateTime @default(now())
+}
+
+model Payment {
+  payment_id         Int           @unique(map: "unique_payment_id") @default(autoincrement())
+  fee_id             Int
+  amount_paid        Decimal       @db.Decimal(14, 2)
+  transaction_ref    String        @id @unique
+  status             PaymentStatus
+  payment_date       DateTime      @default(now())
+  receipt_drive_url  String?
+  student_email      String
+  student_name       String?
+  jamb_number        String?
+  matric_number      String?
+  level              Level?
+  address            String?
+  phone_number       String?
+  items              Json?
+  percentage_paid    Decimal?      @db.Decimal(5, 2)
+  balance_due        Decimal?      @db.Decimal(14, 2)
+  original_reference String?
+  is_manual         Boolean   @default(false)
+  is_balance_payment Boolean   @default(false)
+  recorded_by       Int?
+  recorder          Admin?    @relation(fields: [recorded_by], references: [admin_id])
+  fee                Fee           @relation(fields: [fee_id], references: [fee_id])
+}
+
 enum Level {
   L100
   L200
@@ -34,54 +99,4 @@ enum PaymentStatus {
   successful
   pending
   failed
-}
-
-model Program {
-  program_id   Int         @id @default(autoincrement())
-  program_name String
-  program_type ProgramType
-  fees         Fee[]
-}
-
-model Fee {
-  fee_id       Int      @id @default(autoincrement())
-  program_id   Int
-  program      Program  @relation(fields: [program_id], references: [program_id])
-  fee_category String
-  amount       Decimal  @db.Decimal(14, 2)
-  session      String?
-  semester     String?
-  levels       Level[]  @default([])
-  payments     Payment[]
-}
-
-model Admin {
-  admin_id   Int       @id @default(autoincrement())
-  name       String
-  email      String    @unique
-  password   String
-  role       AdminRole @default(admin)
-  created_at DateTime  @default(now())
-}
-
-model Payment {
-  payment_id        Int           @id @default(autoincrement())
-  fee_id            Int
-  fee               Fee           @relation(fields: [fee_id], references: [fee_id])
-  amount_paid       Decimal       @db.Decimal(14, 2)
-  percentage_paid   Decimal?      @db.Decimal(5, 2)
-  balance_due       Decimal?      @db.Decimal(14, 2)
-  transaction_ref   String        @unique
-  status            PaymentStatus
-  payment_date      DateTime      @default(now())
-  receipt_drive_url String?
-  student_email     String
-  student_name      String?
-  jamb_number       String?
-  matric_number     String?
-  level             Level?
-  phone_number      String?
-  address           String?
-  items             Json?
-  original_reference String?
 }
