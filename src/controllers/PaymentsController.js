@@ -30,6 +30,9 @@ class PaymentsController {
         fee_id: payment.fee_id,
         phone_number: payment.phone_number,
         address: payment.address,
+        jamb_number: payment.jamb_number,
+        matric_number: payment.matric_number,
+        level: payment.level,
       });
     } catch (err) {
       return ApiResponse.error(res, err);
