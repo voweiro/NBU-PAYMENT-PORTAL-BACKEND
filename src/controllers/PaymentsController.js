@@ -304,7 +304,7 @@ class PaymentsController {
 
   async manualEntry(req, res) {
     try {
-      const { fee_id, feeIds, items, student_email, student_name, amount_paid, jamb_number, matric_number, level, phone_number, address, is_balance_payment } = (req.validated && req.validated.body) || req.body;
+      const { fee_id, feeIds, items, student_email, student_name, amount_paid, jamb_number, matric_number, level, phone_number, address, is_balance_payment, original_reference } = (req.validated && req.validated.body) || req.body;
       const adminId = req.user?.id || req.user?.admin_id;
       if (!adminId) return ApiResponse.error(res, 'Unauthorized: Admin ID missing', 401);
 
@@ -338,8 +338,24 @@ class PaymentsController {
         address,
         isManual: true,
         recordedBy: adminId,
-        isBalancePayment: !!is_balance_payment
+        isBalancePayment: !!is_balance_payment,
+        originalReference: original_reference
       });
+
+      // If this is a balance payment, update the original record
+      if (is_balance_payment && original_reference) {
+          try {
+              // We don't check for "payment not found" here because createPaymentRecord didn't fail
+              // But updateBalanceByRef will throw if not found.
+              const updatedOriginal = await this.paymentModel.updateBalanceByRef(original_reference, amount_paid);
+              
+              // If now fully paid, generate receipt for the original payment too?
+              // Logic similar to processBalance could go here, but let's stick to the core requirement first.
+          } catch (balanceErr) {
+              console.error("Failed to update original payment balance:", balanceErr);
+              // We log but do not fail the request because the manual payment itself was recorded successfully.
+          }
+      }
 
       // Audit Log
       await this.paymentModel.prisma.auditLog.create({
