@@ -321,7 +321,7 @@ class PaymentsController {
         }
       }
       
-      const reference = `MANUAL_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+      const reference = `NBUPORTAL_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
 
       const payment = await this.paymentModel.createPaymentRecord({
         feeId: primaryFeeId,
