@@ -47,7 +47,14 @@ class PaymentModel extends BaseModel {
     if (totalAmount > 0) {
       const amountPaid = Number(amount || 0);
       percentagePaid = Math.min(100, Math.max(0, (amountPaid / totalAmount) * 100));
-      balanceDue = Math.max(0, totalAmount - amountPaid);
+      
+      if (isBalancePayment || originalReference) {
+        // Balance payment records are just transactions; they don't carry a balance of their own.
+        // The original record tracks the actual student debt.
+        balanceDue = 0;
+      } else {
+        balanceDue = Math.max(0, totalAmount - amountPaid);
+      }
     }
 
     return this.model.create({
