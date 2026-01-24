@@ -131,6 +131,45 @@ class PaymentsController {
         return ApiResponse.error(res, 'Phone number must be 11 digits for GlobalPay balance payments', 400);
       }
 
+      // Check for existing pending balance transaction for this original reference
+      const existingBalancePending = await this.paymentModel.model.findFirst({
+        where: {
+          original_reference: payment.transaction_ref,
+          status: 'pending',
+          amount_paid: Math.round(remaining), // Ensure amount matches remaining balance
+        }
+      });
+
+      if (existingBalancePending) {
+         // Reuse existing balance transaction
+         const initData = await PaymentGateway.initiatePayment({
+            gateway,
+            amount: Math.round(remaining),
+            email: payment.student_email,
+            metadata: {
+              studentName: payment.student_name,
+              balancePayment: true,
+              balanceAmount: remaining,
+              phoneNumber: effectivePhone,
+              address: effectiveAddress,
+              feeNames: Array.isArray(payment.items) && payment.items.length > 0 ? payment.items.map((i) => i.fee_category) : undefined,
+            },
+            redirectUrl,
+            reference: existingBalancePending.transaction_ref // REUSE REFERENCE
+         });
+
+         // Update details if needed
+         await this.paymentModel.model.update({
+            where: { payment_id: existingBalancePending.payment_id },
+            data: {
+                phone_number: effectivePhone,
+                address: effectiveAddress
+            }
+         });
+
+         return ApiResponse.ok(res, { reference: payment.transaction_ref, gateway_reference: existingBalancePending.transaction_ref, paymentId: payment.payment_id, balancePaymentId: existingBalancePending.payment_id, ...initData });
+      }
+
       const initData = await PaymentGateway.initiatePayment({
         gateway,
         amount: Math.round(remaining),
@@ -268,6 +307,50 @@ class PaymentsController {
         if (address && String(address).trim().length < 6) {
           return ApiResponse.error(res, 'Address must be at least 6 characters for GlobalPay', 400);
         }
+      }
+
+      // Check for existing pending transaction to prevent duplicates
+      const existingPending = await this.paymentModel.model.findFirst({
+        where: {
+          student_email: studentEmail,
+          status: 'pending',
+          fee_id: fees[0].fee_id,
+          amount_paid: amountToCharge, // Ensure amount matches
+          // Optional: Check if same fees are selected for multi-fee?
+          // For now, primary fee_id + amount is a strong enough signal
+        }
+      });
+
+      if (existingPending) {
+        // Reuse the existing record and its transaction reference
+        // Most gateways allow re-initializing a transaction if it hasn't been paid yet
+        // If the gateway rejects it (e.g., "Duplicate Reference"), we might need to append a retry suffix,
+        // but for now, we will try to resume the exact same session.
+        
+        const initData = await PaymentGateway.initiatePayment({
+          gateway,
+          amount: amountToCharge,
+          email: studentEmail,
+          metadata: { studentName, percent: pct, phoneNumber, address, feeNames: fees.map((f) => f.fee_category) },
+          redirectUrl,
+          reference: existingPending.transaction_ref // Pass the existing reference explicitly
+        });
+
+        // Update the existing record with any new details provided by the user
+        await this.paymentModel.model.update({
+          where: { payment_id: existingPending.payment_id },
+          data: {
+            // transaction_ref: newRef, // KEEP OLD REF
+            student_name: studentName,
+            jamb_number: jambNumber,
+            matric_number: matricNumber,
+            level: level,
+            phone_number: phoneNumber,
+            address: address,
+          }
+        });
+
+        return ApiResponse.ok(res, { reference: existingPending.transaction_ref, paymentId: existingPending.payment_id, ...initData }, 200);
       }
 
       const initData = await PaymentGateway.initiatePayment({

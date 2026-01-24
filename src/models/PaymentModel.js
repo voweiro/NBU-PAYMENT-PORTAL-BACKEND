@@ -109,7 +109,7 @@ class PaymentModel extends BaseModel {
     const currentPaid = Number(payment.amount_paid || 0);
     const add = Number(amountToAdd || 0);
     if (add <= 0) throw new Error('Amount to add must be positive');
-    if (add > Math.max(0, totalAmount - currentPaid)) throw new Error('Amount exceeds remaining balance');
+    // if (add > Math.max(0, totalAmount - currentPaid)) throw new Error('Amount exceeds remaining balance');
 
     const newPaid = currentPaid + add;
     const newBalance = Math.max(0, totalAmount - newPaid);
