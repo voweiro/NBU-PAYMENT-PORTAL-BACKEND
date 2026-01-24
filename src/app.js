@@ -9,8 +9,25 @@ const receiptsRouter = require("./routes/receipts");
 const adminsRouter = require("./routes/admins");
 const dashboardRouter = require("./routes/dashboard");
 
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
+
 const app = express();
-// CORS configuration: allow frontend URL and local dev origins
+
+// 1. HELMET: Secure HTTP headers (CSP, HSTS, XSS protection, etc.)
+app.use(helmet());
+
+// 2. RATE LIMITING: Prevent brute-force and DDoS
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per window
+  message: { success: false, message: "Too many requests from this IP, please try again after 15 minutes" },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use("/api/", globalLimiter);
+
+// 3. CORS configuration: allow frontend URL and local dev origins
 const allowedOrigins = [
   process.env.FRONTEND_URL,
   process.env.FRONTEND_URL?.replace("https://", "http://"),
@@ -51,6 +68,22 @@ app.use("/api/dashboard", dashboardRouter);
 // Handle 404 for unmatched routes
 app.use((req, res) => {
   res.status(404).json({ success: false, message: "API endpoint not found" });
+});
+
+// 4. GLOBAL ERROR HANDLER: Sanitize error responses
+app.use((err, req, res, next) => {
+  console.error("❌ Fatal Error:", err.stack);
+  
+  const status = err.status || 500;
+  const message = process.env.NODE_ENV === "production" 
+    ? "An internal server error occurred" 
+    : err.message;
+
+  res.status(status).json({
+    success: false,
+    message,
+    ...(process.env.NODE_ENV !== "production" && { stack: err.stack })
+  });
 });
 
 module.exports = app;

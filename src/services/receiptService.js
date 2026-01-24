@@ -251,7 +251,7 @@ async function generateReceiptPDFBuffer({ payment, fee, program, isBalanceSettle
       // Position payment summary so its bottom edge meets the footer border
       const footerY = 660; // footer start line
       const summaryHeight = 110;
-      const amountY = footerY - summaryHeight; // aligns summary bottom with footer
+      const amountY = footerY - summaryHeight - 40; // Shifted up to create more breathing room from footer
       doc.roundedRect(40, amountY, doc.page.width - 80, 110, 12).fill(darkGray);
       
       const amountPaid = Number(payment.amount_paid || 0);
