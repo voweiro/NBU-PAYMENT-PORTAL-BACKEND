@@ -34,7 +34,7 @@ async function buildReceiptEmail({ payment, fee, program, receiptDriveUrl, isBal
   const paymentMethod = 'ONLINE PAYMENT';
   const items = Array.isArray(payment?.items) && payment.items.length > 0
     ? payment.items
-    : [{ name: fee?.fee_category || 'Fee', amount: Number(fee?.amount || payment?.amount_paid || 0) }];
+    : [{ name: fee?.fee_category || 'Fee', fee_category: fee?.fee_category, amount: Number(fee?.amount || payment?.amount_paid || 0) }];
 
   const totalPaid = Number(payment?.amount_paid || 0);
   const verifyUrl = `${process.env.FRONTEND_URL || 'http://localhost:3001'}/payment/lookup?ref=${encodeURIComponent(payment?.transaction_ref || '')}`;
@@ -57,7 +57,7 @@ async function buildReceiptEmail({ payment, fee, program, receiptDriveUrl, isBal
     .map(
       (it) => `
         <tr>
-          <td style="padding:8px 12px;border:1px solid #e5e7eb;color:#111827;font-size:14px;">${it.name || fee?.fee_category || 'Fee'}</td>
+          <td style="padding:8px 12px;border:1px solid #e5e7eb;color:#111827;font-size:14px;">${it.fee_category || it.name || fee?.fee_category || 'Fee'}</td>
           <td style="padding:8px 12px;border:1px solid #e5e7eb;color:#111827;font-size:14px;text-align:right;">${formatCurrency(it.amount)}</td>
         </tr>`
     )

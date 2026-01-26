@@ -456,7 +456,7 @@ class PaymentsController {
         }
       });
 
-      // Generate Receipt
+      // Generate Receipt and Send Email
       try {
         let fee = null;
         let program = null;
@@ -473,9 +473,33 @@ class PaymentsController {
                 await this.paymentModel.setReceiptUrlById(payment.payment_id, receipt.driveUrl);
                 payment.receipt_drive_url = receipt.driveUrl;
             }
+
+            // Send Email with Receipt
+            if (this.emailService) {
+                const { subject, html } = await buildReceiptEmail({
+                  payment,
+                  fee,
+                  program,
+                  receiptDriveUrl: receipt.driveUrl,
+                  isBalanceSettlement: !!is_balance_payment,
+                });
+
+                await this.emailService.sendMail({
+                  to: student_email,
+                  subject,
+                  text: 'Your payment was recorded successfully. Receipt attached.',
+                  html,
+                  attachments: [
+                    {
+                      filename: receipt.filename,
+                      content: receipt.buffer,
+                    },
+                  ],
+                });
+            }
         }
       } catch (rErr) {
-        console.error('Manual payment receipt generation failed:', rErr);
+        console.error('Manual payment receipt/email generation failed:', rErr);
       }
 
       return ApiResponse.ok(res, payment, 201);
@@ -492,6 +516,27 @@ class PaymentsController {
       const lookupRef = original_reference || reference;
       let payment = await this.paymentModel.getByRef(lookupRef);
       // Don't fail early; GlobalPay may pass provider ref, while our DB stores merchant ref
+
+      // Helper to enrich items with fee categories if missing
+      const enrichItems = async (p) => {
+        if (!p || !Array.isArray(p.items) || p.items.length === 0) return p;
+        // Check if ANY item is missing fee_category
+        const needsEnrichment = p.items.some(it => !it.fee_category);
+        if (!needsEnrichment) return p;
+        
+        const feeIds = p.items.map(it => it.fee_id).filter(id => id);
+        if (feeIds.length === 0) return p;
+        
+        const fees = await this.feeModel.prisma.fee.findMany({ where: { fee_id: { in: feeIds } } });
+        const feeMap = {};
+        fees.forEach(f => { feeMap[f.fee_id] = f.fee_category; });
+        
+        const enriched = p.items.map(it => ({
+            ...it,
+            fee_category: it.fee_category || feeMap[it.fee_id] || it.name || 'Fee'
+        }));
+        return { ...p, items: enriched };
+      };
 
       const verifyData = await PaymentGateway.verifyPayment({ gateway, reference });
 
@@ -523,14 +568,25 @@ class PaymentsController {
               try {
                 const fee = await this.feeModel.getById(updatedOriginal.fee_id);
                 const program = await this.feeModel.prisma.program.findUnique({ where: { program_id: fee.program_id } });
-                const receipt = await ReceiptService.generateAndUploadReceipt({ payment: updatedOriginal, fee, program, isBalanceSettlement: true });
+                
+                let enrichedPayment = await enrichItems(updatedOriginal);
+                
+                // Persist enriched items if changed
+                if (JSON.stringify(enrichedPayment.items) !== JSON.stringify(updatedOriginal.items)) {
+                    await this.paymentModel.model.update({
+                        where: { payment_id: updatedOriginal.payment_id },
+                        data: { items: enrichedPayment.items }
+                    });
+                }
+                
+                const receipt = await ReceiptService.generateAndUploadReceipt({ payment: enrichedPayment, fee, program, isBalanceSettlement: true });
                 if (receipt.driveUrl) {
                   await this.paymentModel.setReceiptUrlById(updatedOriginal.payment_id, receipt.driveUrl);
                 }
 
                 if (this.emailService) {
                   const { subject, html } = await buildReceiptEmail({
-                    payment: updatedOriginal,
+                    payment: enrichedPayment,
                     fee,
                     program,
                     receiptDriveUrl: receipt.driveUrl,
@@ -561,7 +617,31 @@ class PaymentsController {
       } else {
         // Normal payment flow: mark the original record by its own reference
         const normalUpdateRef = verifyData.merchantRef || lookupRef;
-        await this.paymentModel.updateStatusByRef(normalUpdateRef, status);
+        
+        // Ensure we have the correct payment record to check/enrich items
+        let paymentToProcess = payment;
+        if (!paymentToProcess || paymentToProcess.transaction_ref !== normalUpdateRef) {
+             paymentToProcess = await this.paymentModel.getByRef(normalUpdateRef);
+        }
+
+        if (paymentToProcess) {
+             const enriched = await enrichItems(paymentToProcess);
+             const itemsChanged = JSON.stringify(enriched.items) !== JSON.stringify(paymentToProcess.items);
+             
+             if (itemsChanged) {
+                 await this.paymentModel.model.update({
+                     where: { transaction_ref: normalUpdateRef },
+                     data: { status, items: enriched.items }
+                 });
+                 paymentToProcess = enriched;
+                 payment = enriched; // Update local variable for later use
+             } else {
+                 await this.paymentModel.updateStatusByRef(normalUpdateRef, status);
+             }
+        } else {
+             // Fallback if payment not found (should be rare)
+             await this.paymentModel.updateStatusByRef(normalUpdateRef, status);
+        }
 
         if (status === 'successful') {
           try {
@@ -572,6 +652,10 @@ class PaymentsController {
             if (!payment) {
               return ApiResponse.error(res, 'Payment not found after verification', 404);
             }
+            
+            // Re-enrich just in case (though should be handled above)
+            payment = await enrichItems(payment);
+
             const fee = await this.feeModel.getById(payment.fee_id);
             const program = await this.feeModel.prisma.program.findUnique({ where: { program_id: fee.program_id } });
             const receipt = await ReceiptService.generateAndUploadReceipt({ payment, fee, program, isBalanceSettlement: false });
