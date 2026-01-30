@@ -22,7 +22,6 @@ const FeeCreateSchema = z.object({
     program_id: z.string(),
     fee_category: z.string().min(2),
     amount: z.number().positive(),
-    session: z.string().optional(),
     semester: z.string().optional(),
     levels: z.array(LevelEnum).default([]).optional(),
   }),
@@ -33,7 +32,6 @@ const FeeUpdateSchema = z.object({
   body: z.object({
     fee_category: z.string().min(2).optional(),
     amount: z.number().positive().optional(),
-    session: z.string().optional(),
     semester: z.string().optional(),
     levels: z.array(LevelEnum).optional(),
   }),
@@ -55,6 +53,7 @@ const PaymentInitiateSchema = z.object({
       phoneNumber: z.string().regex(/^\d{11}$/, 'Phone number must be 11 digits').optional(),
       // Address recommended > 5 chars per GlobalPay docs
       address: z.string().min(6, 'Address must be at least 6 characters').optional(),
+      sessionId: z.number().optional(),
     })
     .refine((data) => Boolean(data.feeId) || (Array.isArray(data.feeIds) && data.feeIds.length > 0), {
       message: 'Provide either feeId or feeIds',
@@ -77,6 +76,7 @@ const PaymentManualSchema = z.object({
     address: z.string().optional(),
     is_balance_payment: z.boolean().optional(),
     original_reference: z.string().optional(),
+    sessionId: z.number().optional(),
   }).refine((data) => Boolean(data.fee_id) || (Array.isArray(data.items) && data.items.length > 0) || (Array.isArray(data.feeIds) && data.feeIds.length > 0), {
     message: 'Provide fee_id, feeIds, or items',
     path: ['fee_id'],

@@ -250,7 +250,7 @@ class PaymentsController {
   }
   async initiate(req, res) {
     try {
-      const { feeId, feeIds, studentEmail, studentName, gateway = 'global', jambNumber, matricNumber, percent, level, phoneNumber, address } = req.validated.body || req.body;
+      const { feeId, feeIds, studentEmail, studentName, gateway = 'global', jambNumber, matricNumber, percent, level, phoneNumber, address, sessionId } = req.validated.body || req.body;
       // Support single or multiple fees
       const ids = Array.isArray(feeIds) && feeIds.length > 0 ? feeIds.map((id) => Number(id)) : [Number(feeId)];
       const fees = await this.feeModel.prisma.fee.findMany({ where: { fee_id: { in: ids } }, include: { program: true } });
@@ -316,6 +316,7 @@ class PaymentsController {
           status: 'pending',
           fee_id: fees[0].fee_id,
           amount_paid: amountToCharge, // Ensure amount matches
+          ...(sessionId ? { session_id: sessionId } : {})
           // Optional: Check if same fees are selected for multi-fee?
           // For now, primary fee_id + amount is a strong enough signal
         }
@@ -377,6 +378,7 @@ class PaymentsController {
         level,
         phoneNumber,
         address,
+        sessionId,
       });
 
       return ApiResponse.ok(res, { reference: ref, paymentId: created.payment_id, ...initData }, 201);
@@ -387,7 +389,7 @@ class PaymentsController {
 
   async manualEntry(req, res) {
     try {
-      const { fee_id, feeIds, items, student_email, student_name, amount_paid, jamb_number, matric_number, level, phone_number, address, is_balance_payment, original_reference } = (req.validated && req.validated.body) || req.body;
+      const { fee_id, feeIds, items, student_email, student_name, amount_paid, jamb_number, matric_number, level, phone_number, address, is_balance_payment, original_reference, sessionId } = (req.validated && req.validated.body) || req.body;
       const adminId = req.user?.id || req.user?.admin_id;
       if (!adminId) return ApiResponse.error(res, 'Unauthorized: Admin ID missing', 401);
 
@@ -422,7 +424,8 @@ class PaymentsController {
         isManual: true,
         recordedBy: adminId,
         isBalancePayment: !!is_balance_payment,
-        originalReference: original_reference
+        originalReference: original_reference,
+        sessionId,
       });
 
       // If this is a balance payment, update the original record

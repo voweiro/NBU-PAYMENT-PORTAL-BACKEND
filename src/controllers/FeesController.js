@@ -26,12 +26,11 @@ class FeesController {
 
   async create(req, res) {
     try {
-      const { program_id, fee_category, amount, session, semester, levels } = req.validated.body || req.body;
+      const { program_id, fee_category, amount, semester, levels } = req.validated.body || req.body;
       const fee = await this.feeModel.create({
         program_id: Number(program_id),
         fee_category,
         amount,
-        session,
         semester,
         levels: Array.isArray(levels) ? levels : [],
       });

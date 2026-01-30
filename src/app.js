@@ -8,6 +8,7 @@ const paymentsRouter = require("./routes/payments");
 const receiptsRouter = require("./routes/receipts");
 const adminsRouter = require("./routes/admins");
 const dashboardRouter = require("./routes/dashboard");
+const academicSessionRouter = require("./routes/academicSessionRoutes");
 
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
@@ -64,6 +65,7 @@ app.use("/api/payments", paymentsRouter);
 app.use("/api/receipts", receiptsRouter);
 app.use("/api/admins", adminsRouter);
 app.use("/api/dashboard", dashboardRouter);
+app.use("/api/academic-sessions", academicSessionRouter);
 
 // Handle 404 for unmatched routes
 app.use((req, res) => {

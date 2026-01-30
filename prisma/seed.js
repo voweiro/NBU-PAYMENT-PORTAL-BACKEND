@@ -21,7 +21,6 @@ async function main() {
         program_id: program.program_id,
         fee_category: 'Tuition',
         amount: 150000,
-        session: '2024/2025',
         semester: 'First',
       },
     });
@@ -37,7 +36,6 @@ async function main() {
         program_id: program.program_id,
         fee_category: 'Acceptance',
         amount: 25000,
-        session: '2024/2025',
         semester: 'First',
       },
     });

@@ -19,7 +19,6 @@ model Fee {
   program_id   Int
   fee_category String
   amount       Decimal   @db.Decimal(14, 2)
-  session      String?
   semester     String?
   levels       Level[]   @default([])
   program      Program   @relation(fields: [program_id], references: [program_id])
@@ -35,6 +34,17 @@ model Admin {
   created_at DateTime  @default(now())
   audit_logs AuditLog[]
   recorded_payments Payment[]
+}
+
+model AcademicSession {
+  session_id   Int      @id @default(autoincrement())
+  session_name String   @unique // e.g. "2023/2024"
+  is_current   Boolean  @default(false)
+  start_date   DateTime?
+  end_date     DateTime?
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+  payments     Payment[]
 }
 
 model AuditLog {
@@ -71,6 +81,8 @@ model Payment {
   recorded_by       Int?
   recorder          Admin?    @relation(fields: [recorded_by], references: [admin_id])
   fee                Fee           @relation(fields: [fee_id], references: [fee_id])
+  session_id        Int?
+  session           AcademicSession? @relation(fields: [session_id], references: [session_id])
 }
 
 enum Level {

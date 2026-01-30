@@ -22,7 +22,13 @@ class ReceiptsController {
 
       const fee = await this.paymentModel.prisma.fee.findUnique({ where: { fee_id: payment.fee_id } });
       const program = await this.paymentModel.prisma.program.findUnique({ where: { program_id: fee.program_id } });
-      const receipt = await ReceiptService.generateAndUploadReceipt({ payment, fee, program });
+      
+      let session = null;
+      if (payment.session_id) {
+        session = await this.paymentModel.prisma.academicSession.findUnique({ where: { session_id: payment.session_id } });
+      }
+
+      const receipt = await ReceiptService.generateAndUploadReceipt({ payment, fee, program, session });
       await this.paymentModel.setReceiptUrlById(payment.payment_id, receipt.driveUrl);
       return ApiResponse.ok(res, { id: Number(rawId), receiptUrl: receipt.driveUrl });
     } catch (err) {

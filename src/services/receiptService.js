@@ -36,305 +36,240 @@ async function generateQRCode(payment) {
   });
 }
 
-async function generateReceiptPDFBuffer({ payment, fee, program, isBalanceSettlement = false }) {
+async function generateReceiptPDFBuffer({ payment, fee, program, session, isBalanceSettlement = false }) {
   return new Promise(async (resolve, reject) => {
     try {
-      const doc = new PDFDocument({ size: 'A4', margin: 30 });
+      const doc = new PDFDocument({ size: 'A4', margin: 40 });
       const chunks = [];
       doc.on('data', (d) => chunks.push(d));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
 
-      // University colors and modern palette
-      const primaryRed = '#E74C3C';
-      const primaryBlue = '#3498DB';
-      const darkBlue = '#2980B9';
-      const white = '#FFFFFF';
-      const darkGray = '#2C3E50';
-      const lightGray = '#ECF0F1';
-      const accentGold = '#F39C12';
+      // --- BRANDING COLORS ---
+      const colors = {
+        primary: '#1B3F8B',   // University Navy
+        accent: '#D4AF37',    // Gold
+        dark: '#1F2937',      // Dark Grayish Blue
+        light: '#F3F4F6',     // Light Gray
+        white: '#FFFFFF',
+        success: '#059669',   // Green
+        danger: '#DC2626'     // Red
+      };
 
-      // Extract items (multi-fee) once and reuse
-      const items = Array.isArray(payment.items) ? payment.items : undefined;
+      // --- HELPER FUNCTIONS ---
+      const drawLine = (y) => {
+        doc.lineWidth(0.5).strokeColor('#E5E7EB').moveTo(40, y).lineTo(555, y).stroke();
+      };
 
-      // Generate security features
+      // --- SECURITY FEATURES ---
       const securityHash = generateSecurityHash(payment, fee);
       const qrCodeDataUrl = await generateQRCode(payment);
       const qrCodeBuffer = Buffer.from(qrCodeDataUrl.split(',')[1], 'base64');
 
-      // Create gradient-like effect with multiple rectangles
-      for (let i = 0; i < 5; i++) {
-        const opacity = 0.1 - (i * 0.02);
-        doc.save();
-        doc.fillColor(primaryBlue).opacity(opacity);
-        doc.rect(0, 0, doc.page.width, doc.page.height).fill();
-        doc.restore();
-      }
-
-      // Security watermark pattern
+      // 1. Watermark (Subtle Background)
       doc.save();
-      for (let x = 0; x < doc.page.width; x += 100) {
-        for (let y = 0; y < doc.page.height; y += 100) {
-          doc.fillColor(primaryBlue)
-             .opacity(0.03)
-             .fontSize(8)
-             .font('Helvetica')
-             .text('NBU-OFFICIAL', x, y, { rotate: 45 });
-        }
-      }
+      doc.fillColor(colors.primary).opacity(0.02);
+      doc.fontSize(60).font('Helvetica-Bold');
+      doc.text('NIGERIAN BRITISH UNIVERSITY', 0, 300, { align: 'center', rotate: 45 });
+      doc.text('OFFICIAL RECEIPT', 0, 400, { align: 'center', rotate: 45 });
       doc.restore();
 
-      // Main "PAID" watermark
-      doc.save();
-      doc.rotate(-45, { origin: [doc.page.width / 2, doc.page.height / 2] });
-      doc.fillColor(accentGold)
-         .opacity(0.08)
-         .fontSize(150)
-         .font('Helvetica-Bold')
-         .text('PAID', 0, doc.page.height / 2 - 75, {
-           align: 'center',
-           width: doc.page.width
-         });
-      doc.restore();
-
-      // Modern header with gradient effect
-      const headerHeight = 140;
-      doc.rect(0, 0, doc.page.width, headerHeight).fill(darkGray);
-      doc.rect(0, headerHeight - 20, doc.page.width, 20).fill(primaryBlue);
-
-      // Security border pattern
-      for (let i = 0; i < doc.page.width; i += 10) {
-        doc.rect(i, 0, 5, 5).fill(i % 20 === 0 ? accentGold : primaryRed);
-        doc.rect(i, doc.page.height - 5, 5, 5).fill(i % 20 === 0 ? accentGold : primaryRed);
-      }
-
-      // Logo - increased size
-      let logoExists = false;
+      // 2. Header Section
+      let topY = 40;
+      
+      // Logo
       try {
         const logoPath = path.join(__dirname, '..', 'asserts', 'logo.png');
         if (fs.existsSync(logoPath)) {
-          doc.image(logoPath, 40, 20, { width: 100, height: 100 });
-          logoExists = true;
+          doc.image(logoPath, 40, topY, { width: 60, height: 60 });
         }
-      } catch (logoError) {
-        console.warn('Could not load university logo:', logoError.message);
-      }
+      } catch (e) { /* ignore */ }
 
-      // University header text - shifted much more to the right for better logo spacing
-      const headerTextX = logoExists ? 180 : 50;
+      // University Text
+      doc.font('Helvetica-Bold').fontSize(18).fillColor(colors.primary)
+         .text('NIGERIAN BRITISH UNIVERSITY', 0, topY + 10, { align: 'center' });
       
-      doc.fillColor(white)
-         .fontSize(20)
-         .font('Helvetica-Bold')
-         .text('NIGERIAN BRITISH UNIVERSITY', headerTextX, 30);
+      doc.font('Helvetica').fontSize(9).fillColor(colors.dark)
+         .text('KM 10, Port Harcourt - Aba Expressway, Abia State, Nigeria.', 0, topY + 35, { align: 'center' });
+      doc.text('Website: www.nbu.edu.ng | Email: bursary@nbu.edu.ng', 0, topY + 48, { align: 'center' });
+
+      // Title Box
+      const titleY = topY + 80;
+      doc.rect(40, titleY, 515, 30).fill(colors.primary);
+      doc.font('Helvetica-Bold').fontSize(12).fillColor(colors.white)
+         .text('OFFICIAL PAYMENT RECEIPT', 40, titleY + 9, { align: 'center', width: 515 });
+
+      // 3. Receipt Meta Info (Date & Ref)
+      const metaY = titleY + 45;
+      doc.fillColor(colors.dark).fontSize(10);
       
-      doc.fontSize(14)
-         .font('Helvetica')
-         .fillColor(lightGray)
-         .text('OFFICIAL PAYMENT RECEIPT', headerTextX, 55);
+      // Left: Date
+      doc.font('Helvetica-Bold').text('Date Generated:', 40, metaY);
+      doc.font('Helvetica').text(new Date().toLocaleDateString('en-GB'), 130, metaY);
 
-      doc.fontSize(11)
-         .fillColor(white)
-         .text('KM10  PortHacourt Road/ Aba Expressway, Abia State, Nigeria', headerTextX, 75);
+      // Right: Receipt No
+      doc.font('Helvetica-Bold').text('Transaction Ref:', 350, metaY);
+      doc.font('Helvetica').fillColor(colors.danger).text(payment.transaction_ref, 440, metaY);
 
-      // Security hash in header with better positioning
-      doc.fontSize(9)
-         .fillColor(accentGold)
-         .font('Helvetica-Bold')
-         .text(`Security Code: ${securityHash}`, headerTextX, 95);
+      drawLine(metaY + 20);
 
-      // Payment reference section with modern design
-      const refY = 170;
-      doc.roundedRect(40, refY, doc.page.width - 80, 70, 10).fill(lightGray);
-      doc.roundedRect(50, refY + 10, 8, 50, 4).fill(primaryBlue);
+      // 4. Student Details Section
+      const studentY = metaY + 40;
+      doc.rect(40, studentY, 515, 110).fill(colors.light); // Background box
+      doc.strokeColor(colors.primary).lineWidth(2).moveTo(40, studentY).lineTo(40, studentY + 110).stroke(); // Accent strip
+
+      const fieldX = 60;
+      const valueX = 180;
+      let currentY = studentY + 15;
+      const rowHeight = 20;
+
+      // Row 1: Name & Matric
+      doc.fillColor(colors.dark).fontSize(10);
+      doc.font('Helvetica').text('Student Name:', fieldX, currentY);
+      doc.font('Helvetica-Bold').text(payment.student_name || 'N/A', valueX, currentY);
       
-      doc.fillColor(darkGray)
-         .fontSize(14)
-         .font('Helvetica-Bold')
-         .text('Payment Reference Number', 75, refY + 15);
+      // Row 2: Program
+      currentY += rowHeight;
+      doc.font('Helvetica').text('Program of Study:', fieldX, currentY);
+      doc.font('Helvetica-Bold').text(program.program_name, valueX, currentY);
+
+      // Row 3: Session (NEW!)
+      currentY += rowHeight;
+      doc.font('Helvetica').text('Academic Session:', fieldX, currentY);
+      doc.font('Helvetica-Bold').text(session ? session.session_name : 'N/A', valueX, currentY);
+
+      // Row 4: Level & Semester
+      currentY += rowHeight;
+      doc.font('Helvetica').text('Level / Semester:', fieldX, currentY);
+      const levelTxt = payment.level ? `${payment.level} Level` : 'N/A';
+      const semTxt = fee.semester ? `${fee.semester} Semester` : '';
+      doc.font('Helvetica-Bold').text(`${levelTxt} ${semTxt ? ` - ${semTxt}` : ''}`, valueX, currentY);
+
+      // 5. Payment Details Section
+      currentY = studentY + 130;
       
-      doc.fontSize(20)
-         .fillColor(primaryRed)
-         .text(`NBU-${payment.transaction_ref}`, 75, refY + 35);
-
-      // Student information cards
-      const cardY = 270;
-      const cardHeight = 210; // extend card height to create more vertical space
+      doc.font('Helvetica-Bold').fontSize(11).fillColor(colors.primary)
+         .text('PAYMENT BREAKDOWN', 40, currentY);
       
-      // Left card - Student Details
-      doc.roundedRect(40, cardY, (doc.page.width - 100) / 2, cardHeight, 8).fill(white);
-      doc.roundedRect(40, cardY, (doc.page.width - 100) / 2, 30, 8).fill(primaryBlue);
+      currentY += 20;
+
+      // Table Header
+      doc.rect(40, currentY, 515, 25).fill(colors.dark);
+      doc.fillColor(colors.white).fontSize(9).font('Helvetica-Bold');
+      doc.text('FEE DESCRIPTION', 50, currentY + 8);
+      doc.text('AMOUNT (NGN)', 450, currentY + 8, { align: 'right' });
       
-      doc.fillColor(white)
-         .fontSize(14)
-         .font('Helvetica-Bold')
-         .text('STUDENT INFORMATION', 50, cardY + 8);
+      currentY += 25;
 
-      let leftY = cardY + 45;
-      const leftX = 50;
+      // Table Content
+      const items = Array.isArray(payment.items) ? payment.items : null;
+      const feeName = items && items.length > 0 
+          ? items.map(i => i.fee_category).join(', ') 
+          : (fee.fee_category || 'Tuition Fee');
       
-      // Student details
-      doc.fillColor(darkGray).fontSize(10).font('Helvetica').text('Student Name:', leftX, leftY);
-      doc.fontSize(12).font('Helvetica-Bold').text(payment.student_name || 'N/A', leftX, leftY + 12);
-      leftY += 35;
-
-      doc.fontSize(10).font('Helvetica').text('Program:', leftX, leftY);
-      doc.fontSize(11).font('Helvetica-Bold').text(program.program_name, leftX, leftY + 12, { width: 180 });
-      leftY += 35;
-
-      doc.fontSize(10).font('Helvetica').text('Fee Category:', leftX, leftY);
-      // Render fee names as responsive chips that wrap nicely
-      const chipStartY = leftY + 8;
-      let chipX = leftX;
-      let chipY = chipStartY + 14;
-      const chipPaddingX = 6;
-      const chipPaddingY = 3;
-      const chipGap = 4;
-      const chipMaxWidth = ((doc.page.width - 100) / 2) - 40; // widen chip row width within card
-
-      const feeNames = (items && items.length > 0)
-        ? items.map((it) => String(it.fee_category || 'Fee')).filter(Boolean)
-        : [String(fee.fee_category || 'N/A')];
-
-      doc.fontSize(10).font('Helvetica-Bold');
-      feeNames.forEach((name) => {
-        const w = doc.widthOfString(name) + chipPaddingX * 2;
-        const h = 14 + chipPaddingY;
-        if (chipX + w > leftX + chipMaxWidth) {
-          chipX = leftX;
-          chipY += h + chipGap;
-        }
-        doc.roundedRect(chipX, chipY, w, h, 5).fill('#ECF0F1');
-        doc.fillColor('#2C3E50').text(name, chipX + chipPaddingX, chipY + chipPaddingY - 1);
-        doc.fillColor(darkGray); // reset
-        chipX += w + chipGap;
-      });
-      leftY = chipY + 28; // push Payment Method further down below chips
-
-      doc.fontSize(10).font('Helvetica').text('Payment Method:', leftX, leftY);
-      doc.fontSize(11).font('Helvetica-Bold').fillColor(primaryBlue).text('Online Payment', leftX, leftY + 12);
-
-      // Right card - Payment Details
-      const rightCardX = 40 + (doc.page.width - 100) / 2 + 20;
-      doc.roundedRect(rightCardX, cardY, (doc.page.width - 100) / 2, cardHeight, 8).fill(white);
-      doc.roundedRect(rightCardX, cardY, (doc.page.width - 100) / 2, 30, 8).fill(primaryRed);
+      doc.fillColor(colors.dark).fontSize(10).font('Helvetica');
+      const startY = currentY + 10;
       
-      doc.fillColor(white)
-         .fontSize(14)
-         .font('Helvetica-Bold')
-         .text('PAYMENT DETAILS', rightCardX + 10, cardY + 8);
-
-      let rightY = cardY + 45;
-      const rightX = rightCardX + 10;
-
-      doc.fillColor(darkGray).fontSize(10).font('Helvetica').text('Payment Date:', rightX, rightY);
-      doc.fontSize(12).font('Helvetica-Bold').text(new Date(payment.payment_date).toLocaleDateString('en-GB'), rightX, rightY + 12);
-      rightY += 35;
-
-      doc.fontSize(10).font('Helvetica').text('Transaction Reference:', rightX, rightY);
-      doc.fontSize(11).font('Helvetica-Bold').text(payment.transaction_ref, rightX, rightY + 12, { width: 180 });
-      rightY += 35;
-
-      doc.fontSize(10).font('Helvetica').text('Payment Status:', rightX, rightY);
-      doc.fontSize(12).font('Helvetica-Bold').fillColor('#27AE60').text('SUCCESSFUL', rightX, rightY + 12);
-      rightY += 35;
-
-      doc.fillColor(darkGray).fontSize(10).font('Helvetica').text('Generated:', rightX, rightY);
-      doc.fontSize(11).font('Helvetica-Bold').text(new Date().toLocaleDateString('en-GB'), rightX, rightY + 12);
-
-      // Remove fee breakdown table for a cleaner appearance.
-      // Keep space consistent regardless of multi-fee to avoid layout shifts.
-      let tableY = 440;
-
-      // Amount section with modern styling
-      // Lift summary section for better visual balance since table was removed
-      // Position payment summary so its bottom edge meets the footer border
-      const footerY = 660; // footer start line
-      const summaryHeight = 110;
-      const amountY = footerY - summaryHeight - 40; // Shifted up to create more breathing room from footer
-      doc.roundedRect(40, amountY, doc.page.width - 80, 110, 12).fill(darkGray);
+      // Print Fee Name (wrapped)
+      doc.text(feeName, 50, startY, { width: 350 });
+      const textHeight = doc.heightOfString(feeName, { width: 350 });
       
-      const amountPaid = Number(payment.amount_paid || 0);
-      // When multiple fees are present, full amount equals sum of items; otherwise fee.amount
+      // Print Amount
       const fullAmount = items && items.length > 0
         ? items.reduce((sum, it) => sum + Number(it.amount || 0), 0)
         : Number(fee.amount || 0);
-      // Accurate percentage; prefer stored percentage_paid if available
-      const storedPct = typeof payment.percentage_paid === 'number' || typeof payment.percentage_paid === 'string'
-        ? Number(payment.percentage_paid)
-        : NaN;
+
+      doc.text(fullAmount.toLocaleString(undefined, { minimumFractionDigits: 2 }), 450, startY, { align: 'right' });
+      
+      // Update Y based on content height
+      currentY = startY + Math.max(textHeight, 15) + 10;
+      drawLine(currentY);
+
+      // 6. Summary Section (Compact & Aligned)
+      currentY += 20;
+      
+      // Summary Box Background
+      const summaryBoxHeight = isBalanceSettlement ? 130 : 110;
+      // Calculate start of summary box to be right aligned or full width? 
+      // Let's make it a compact right-aligned card for better visual hierarchy
+      const summaryWidth = 280;
+      const summaryX = 555 - summaryWidth;
+      
+      doc.roundedRect(summaryX, currentY, summaryWidth, summaryBoxHeight, 8).fill(colors.light);
+      doc.strokeColor(colors.primary).lineWidth(0.5)
+         .moveTo(summaryX, currentY).lineTo(summaryX + summaryWidth, currentY).stroke(); // Top border
+
+      let sumY = currentY + 15;
+      const labelX = summaryX + 15;
+      const valX = 555 - 15;
+
+      // Helper for summary rows
+      const printSummaryRow = (label, value, isBold = false, color = colors.dark, size = 10) => {
+        doc.fillColor(colors.dark).fontSize(size).font('Helvetica').text(label, labelX, sumY);
+        doc.fillColor(color).fontSize(size + 1).font(isBold ? 'Helvetica-Bold' : 'Helvetica')
+           .text(value, summaryX, sumY, { width: summaryWidth - 30, align: 'right' });
+        sumY += 22;
+      };
+
+      printSummaryRow('Total Fees:', `NGN ${fullAmount.toLocaleString()}`, true);
+      
+      const amountPaid = Number(payment.amount_paid || 0);
+      printSummaryRow('Amount Paid:', `NGN ${amountPaid.toLocaleString()}`, true, colors.success);
+      
+      const storedPct = Number(payment.percentage_paid ?? 0);
       const computedPct = fullAmount > 0 ? (amountPaid / fullAmount) * 100 : 0;
-      const percentageDisplay = Math.min(100, Math.max(0, Math.round(Number.isFinite(storedPct) ? storedPct : computedPct)));
-      
-      doc.fillColor(white)
-         .fontSize(16)
-         .font('Helvetica-Bold')
-         .text('PAYMENT SUMMARY', 60, amountY + 20);
+      const percentageDisplay = Math.round(Number.isFinite(storedPct) && storedPct > 0 ? storedPct : computedPct);
+      printSummaryRow('Percentage:', `${percentageDisplay}%`, false);
 
-      // Balance payment notice when generating receipt after balance settlement
+      drawLine(sumY);
+      sumY += 10;
+
+      // Balance
+      const balance = Math.max(0, fullAmount - amountPaid);
+      if (balance > 0 && !isBalanceSettlement) {
+         doc.fillColor(colors.dark).fontSize(11).font('Helvetica-Bold').text('Balance Due:', labelX, sumY);
+         doc.fillColor(colors.danger).fontSize(14).font('Helvetica-Bold')
+            .text(`NGN ${balance.toLocaleString()}`, summaryX, sumY - 2, { width: summaryWidth - 30, align: 'right' });
+      } else {
+         doc.fillColor(colors.success).fontSize(12).font('Helvetica-Bold')
+            .text('FULLY PAID', summaryX, sumY, { width: summaryWidth - 30, align: 'right' });
+      }
+
+      // Balance Note
       if (isBalanceSettlement) {
-        doc.fontSize(10).font('Helvetica').fillColor(white)
-          .text('This is a balance payment. All fees are fully paid; no pending balance.', 60, amountY + 38, { width: doc.page.width - 120 });
+         sumY += 25;
+         doc.fontSize(8).font('Helvetica-Oblique').fillColor(colors.dark)
+            .text('* Balance payment completed.', labelX, sumY, { width: summaryWidth - 30 });
       }
 
-      const baseY = isBalanceSettlement ? amountY + 60 : amountY + 40;
-      doc.fontSize(14)
-         .font('Helvetica')
-         .text('Total Fee Amount:', 60, baseY);
-      doc.fontSize(20)
-         .font('Helvetica-Bold')
-         .fillColor(accentGold)
-         .text(`₦${fullAmount.toLocaleString()}`, doc.page.width - 200, baseY - 5);
-
-      doc.fillColor(white)
-         .fontSize(14)
-         .font('Helvetica')
-         .text('Amount Paid:', 60, baseY + 25);
-      doc.fontSize(20)
-         .font('Helvetica-Bold')
-         .fillColor('#27AE60')
-         .text(`₦${amountPaid.toLocaleString()}`, doc.page.width - 200, baseY + 20);
-
-      // Percentage paid
-      doc.fillColor(white)
-         .fontSize(14)
-         .font('Helvetica')
-         .text('Percentage Paid:', 60, baseY + 48);
-      doc.fontSize(18)
-         .font('Helvetica-Bold')
-         .fillColor(percentageDisplay === 100 ? '#27AE60' : '#F39C12')
-         .text(`${percentageDisplay}%`, doc.page.width - 200, baseY + 43);
-
-      // Security footer
-      // footerY defined above to align summary to border
-      doc.rect(0, footerY, doc.page.width, doc.page.height - footerY).fill(lightGray);
+      // 7. Footer & Security (Dynamic Position)
+      const footerY = Math.min(sumY + 60, 750);
       
-      // Security pattern in footer
-      for (let i = 0; i < doc.page.width; i += 20) {
-        doc.rect(i, footerY, 10, 5).fill(i % 40 === 0 ? primaryBlue : primaryRed);
-      }
+      // Top border for footer
+      doc.lineWidth(2).strokeColor(colors.primary).moveTo(40, footerY - 20).lineTo(555, footerY - 20).stroke();
 
-      // QR Code in bottom left of footer
-      doc.image(qrCodeBuffer, 50, footerY + 15, { width: 60, height: 60 });
-      doc.fontSize(8)
-         .fillColor(darkGray)
-         .font('Helvetica-Bold')
-         .text('Scan to Verify', 50, footerY + 80, { width: 60, align: 'center' });
-
-      doc.fillColor(darkGray)
-         .fontSize(12)
-         .font('Helvetica-Bold')
-         .text('🔒 OFFICIAL DOCUMENT - NIGERIAN BRITISH UNIVERSITY', 130, footerY + 20, { align: 'left' });
+      // QR Code
+      doc.image(qrCodeBuffer, 40, footerY, { width: 60, height: 60 });
       
-      doc.fontSize(10)
-         .font('Helvetica')
-         .text(`Generated: ${new Date().toLocaleDateString('en-GB')} at ${new Date().toLocaleTimeString('en-GB')}`, 130, footerY + 40, { align: 'left' });
+      // Footer Text Info
+      const footerTextX = 120;
+      doc.fillColor(colors.dark).fontSize(8).font('Helvetica-Bold')
+         .text('SCAN TO VERIFY', 40, footerY + 65, { width: 60, align: 'center' });
       
-      doc.text('This receipt is digitally secured and can be verified using the QR code', 130, footerY + 55, { align: 'left' });
+      doc.fontSize(9).font('Helvetica-Bold')
+         .text('OFFICIAL DOCUMENT - NIGERIAN BRITISH UNIVERSITY', footerTextX, footerY + 5);
       
-      doc.fontSize(8)
-         .fillColor(primaryBlue)
-         .text(`Document ID: ${securityHash} | Verification: ${process.env.FRONTEND_URL}/verify`, 130, footerY + 75, { align: 'left' });
+      doc.fontSize(8).font('Helvetica').fillColor(colors.dark)
+         .text('This receipt is automatically generated and serves as official proof of payment.', footerTextX, footerY + 20);
+      doc.text('Verification of this document can be performed by scanning the QR code.', footerTextX, footerY + 32);
+      
+      // Hash Info
+      doc.font('Helvetica-Bold').fillColor(colors.primary)
+         .text(`DOC ID: ${securityHash}  |  REF: ${payment.transaction_ref}`, footerTextX, footerY + 48);
+      
+      // Generated Timestamp
+      doc.font('Helvetica').fillColor('#9CA3AF')
+         .text(`Generated on ${new Date().toLocaleDateString('en-GB')} at ${new Date().toLocaleTimeString('en-GB')}`, 555 - 200, footerY + 65, { align: 'right', width: 200 });
 
       doc.end();
     } catch (error) {
@@ -342,6 +277,8 @@ async function generateReceiptPDFBuffer({ payment, fee, program, isBalanceSettle
     }
   });
 }
+
+
 
 async function uploadToDrive(buffer, filename) {
   // Guard: ensure Drive credentials are configured
@@ -380,8 +317,8 @@ async function uploadToDrive(buffer, filename) {
   return { fileId, driveUrl };
 }
 
-async function generateAndUploadReceipt({ payment, fee, program, isBalanceSettlement = false }) {
-  const buffer = await generateReceiptPDFBuffer({ payment, fee, program, isBalanceSettlement });
+async function generateAndUploadReceipt({ payment, fee, program, session, isBalanceSettlement = false }) {
+  const buffer = await generateReceiptPDFBuffer({ payment, fee, program, session, isBalanceSettlement });
   const filename = `NBU-Receipt-${payment.transaction_ref}.pdf`;
   try {
     const { driveUrl } = await uploadToDrive(buffer, filename);

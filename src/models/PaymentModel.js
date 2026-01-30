@@ -25,11 +25,16 @@ class PaymentModel extends BaseModel {
             program: { select: { program_name: true, program_type: true } },
           },
         },
+        session: {
+          select: {
+            session_name: true,
+          },
+        },
       },
     });
   }
 
-  async createPaymentRecord({ feeId, feeIds, items, studentEmail, studentName, amount, reference, status = 'pending', jambNumber, matricNumber, level, phoneNumber, address, originalReference, isManual = false, recordedBy = null, isBalancePayment = false }) {
+  async createPaymentRecord({ feeId, feeIds, items, studentEmail, studentName, amount, reference, status = 'pending', jambNumber, matricNumber, level, phoneNumber, address, originalReference, isManual = false, recordedBy = null, isBalancePayment = false, sessionId = null }) {
     // Calculate percentage_paid and balance_due
     let totalAmount = 0;
     let percentagePaid = 0;
@@ -77,6 +82,7 @@ class PaymentModel extends BaseModel {
         is_manual: isManual,
         recorded_by: recordedBy,
         is_balance_payment: isBalancePayment,
+        session_id: sessionId,
       },
     });
   }
@@ -124,6 +130,21 @@ class PaymentModel extends BaseModel {
         balance_due: newBalance,
         percentage_paid: Number(pct.toFixed(2)),
         status,
+      },
+    });
+  }
+
+  async updateExpiredPendingPayments() {
+    const twoDaysAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
+    return this.model.updateMany({
+      where: {
+        status: 'pending',
+        payment_date: {
+          lt: twoDaysAgo,
+        },
+      },
+      data: {
+        status: 'failed',
       },
     });
   }
