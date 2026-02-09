@@ -77,6 +77,7 @@ const PaymentManualSchema = z.object({
     is_balance_payment: z.boolean().optional(),
     original_reference: z.string().optional(),
     sessionId: z.number().optional(),
+    bankTransferRef: z.string().optional(),
   }).refine((data) => Boolean(data.fee_id) || (Array.isArray(data.items) && data.items.length > 0) || (Array.isArray(data.feeIds) && data.feeIds.length > 0), {
     message: 'Provide fee_id, feeIds, or items',
     path: ['fee_id'],

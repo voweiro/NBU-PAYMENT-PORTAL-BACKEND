@@ -224,7 +224,11 @@ class PaymentsController {
         try {
           const fee = await this.feeModel.getById(updated.fee_id);
           const program = await this.feeModel.prisma.program.findUnique({ where: { program_id: fee.program_id } });
-          const receipt = await ReceiptService.generateAndUploadReceipt({ payment: updated, fee, program, isBalanceSettlement: true });
+          let session = null;
+          if (updated.session_id) {
+            session = await this.feeModel.prisma.academicSession.findUnique({ where: { session_id: updated.session_id } });
+          }
+          const receipt = await ReceiptService.generateAndUploadReceipt({ payment: updated, fee, program, session, isBalanceSettlement: true });
           if (receipt.driveUrl) {
             await this.paymentModel.setReceiptUrlById(updated.payment_id, receipt.driveUrl);
           }
@@ -471,7 +475,11 @@ class PaymentsController {
         }
         
         if (fee && program) {
-            const receipt = await ReceiptService.generateAndUploadReceipt({ payment, fee, program, isBalanceSettlement: !!is_balance_payment });
+            let session = null;
+            if (payment.session_id) {
+               session = await this.feeModel.prisma.academicSession.findUnique({ where: { session_id: Number(payment.session_id) } });
+            }
+            const receipt = await ReceiptService.generateAndUploadReceipt({ payment, fee, program, session, isBalanceSettlement: !!is_balance_payment });
             if (receipt.driveUrl) {
                 await this.paymentModel.setReceiptUrlById(payment.payment_id, receipt.driveUrl);
                 payment.receipt_drive_url = receipt.driveUrl;
@@ -581,8 +589,13 @@ class PaymentsController {
                         data: { items: enrichedPayment.items }
                     });
                 }
+
+                let session = null;
+                if (updatedOriginal.session_id) {
+                    session = await this.feeModel.prisma.academicSession.findUnique({ where: { session_id: Number(updatedOriginal.session_id) } });
+                }
                 
-                const receipt = await ReceiptService.generateAndUploadReceipt({ payment: enrichedPayment, fee, program, isBalanceSettlement: true });
+                const receipt = await ReceiptService.generateAndUploadReceipt({ payment: enrichedPayment, fee, program, session, isBalanceSettlement: true });
                 if (receipt.driveUrl) {
                   await this.paymentModel.setReceiptUrlById(updatedOriginal.payment_id, receipt.driveUrl);
                 }
@@ -661,7 +674,13 @@ class PaymentsController {
 
             const fee = await this.feeModel.getById(payment.fee_id);
             const program = await this.feeModel.prisma.program.findUnique({ where: { program_id: fee.program_id } });
-            const receipt = await ReceiptService.generateAndUploadReceipt({ payment, fee, program, isBalanceSettlement: false });
+            
+            let session = null;
+            if (payment.session_id) {
+                session = await this.feeModel.prisma.academicSession.findUnique({ where: { session_id: Number(payment.session_id) } });
+            }
+
+            const receipt = await ReceiptService.generateAndUploadReceipt({ payment, fee, program, session, isBalanceSettlement: false });
             if (receipt.driveUrl) {
               await this.paymentModel.setReceiptUrlById(payment.payment_id, receipt.driveUrl);
             }

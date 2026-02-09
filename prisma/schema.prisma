@@ -76,6 +76,7 @@ model Payment {
   percentage_paid    Decimal?      @db.Decimal(5, 2)
   balance_due        Decimal?      @db.Decimal(14, 2)
   original_reference String?
+  bank_transfer_ref  String?
   is_manual         Boolean   @default(false)
   is_balance_payment Boolean   @default(false)
   recorded_by       Int?
