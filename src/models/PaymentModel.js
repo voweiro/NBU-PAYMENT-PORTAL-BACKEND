@@ -7,45 +7,135 @@ class PaymentModel extends BaseModel {
   }
 
   async getById(id) {
-    return this.model.findUnique({ where: { payment_id: Number(id) } });
+    return this.model.findUnique({ where: { id } });
   }
 
   async getByRef(reference) {
-    return this.model.findUnique({ where: { transaction_ref: reference } });
+    return this.model.findUnique({ where: { reference } });
   }
 
-  async listAll() {
+  async getByApplicantId(applicantId) {
     return this.model.findMany({
-      orderBy: { payment_date: 'desc' },
+      where: { applicantId },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        reference: true,
+        amount: true,
+        status: true,
+        feeId: true,
+        userId: true,
+        applicantId: true,
+        applicationId: true,
+        sessionId: true,
+        level: true,
+        semester: true,
+        channel: true,
+        proofUrl: true,
+        createdAt: true,
+        updatedAt: true,
+        fee: {
+          select: {
+            name: true,
+            amount: true,
+            programId: true,
+            description: true
+          }
+        }
+      }
+    });
+  }
+
+  async getByUserId(userId) {
+    return this.model.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        reference: true,
+        amount: true,
+        status: true,
+        feeId: true,
+        userId: true,
+        applicantId: true,
+        applicationId: true,
+        sessionId: true,
+        level: true,
+        semester: true,
+        channel: true,
+        proofUrl: true,
+        createdAt: true,
+        updatedAt: true,
+        fee: {
+          select: {
+            name: true,
+            amount: true,
+            programId: true,
+            description: true
+          }
+        }
+      }
+    });
+  }
+
+  async getByApplicationId(applicationId) {
+    return this.model.findMany({
+      where: { applicationId },
+      orderBy: { createdAt: 'desc' },
       include: {
         fee: {
           select: {
-            fee_category: true,
+            name: true,
             amount: true,
-            program: { select: { program_name: true, program_type: true } },
-          },
-        },
-        session: {
-          select: {
-            session_name: true,
+            programId: true,
+            description: true
           },
         },
       },
     });
   }
 
-  async createPaymentRecord({ feeId, feeIds, items, studentEmail, studentName, amount, reference, status = 'pending', jambNumber, matricNumber, level, phoneNumber, address, originalReference, isManual = false, recordedBy = null, isBalancePayment = false, sessionId = null, bankTransferRef = null }) {
-    // Calculate percentage_paid and balance_due
+  async getByApplicationIds(applicationIds) {
+    return this.model.findMany({
+      where: { applicationId: { in: applicationIds } },
+      select: {
+        applicationId: true,
+        status: true,
+        fee: { select: { name: true, description: true } },
+        amount: true
+      }
+    });
+  }
+
+  async listAll() {
+    return this.model.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: {
+        fee: {
+          select: {
+            name: true,
+            amount: true,
+            programId: true,
+          },
+        },
+      },
+    });
+  }
+
+  async createPaymentRecord({ feeId, feeIds, items, userId, payerType, studentEmail, studentName, amount, reference, status = 'PENDING', jambNumber, matricNumber, applicantId, applicationId, level, phoneNumber, address, originalReference, isManual = false, recordedBy = null, isBalancePayment = false, sessionId = null, bankTransferRef = null, programId = null, programLevelId = null, semester = null, channel = null }) {
+    // Calculate percentagePaid and balanceDue
     let totalAmount = 0;
     let percentagePaid = 0;
     let balanceDue = 0;
 
+    const primaryFeeId = feeId || (Array.isArray(feeIds) && feeIds.length > 0 ? feeIds[0] : null);
+
     if (Array.isArray(items) && items.length > 0) {
       // Multi-fee payment: calculate from items
       totalAmount = items.reduce((sum, item) => sum + Number(item.amount || 0), 0);
-    } else if (feeId) {
+    } else if (primaryFeeId) {
       // Single fee payment: get fee amount
-      const fee = await this.prisma.fee.findUnique({ where: { fee_id: Number(feeId) } });
+      const fee = await this.prisma.fee.findUnique({ where: { id: primaryFeeId } });
       totalAmount = Number(fee?.amount || 0);
     }
 
@@ -64,40 +154,52 @@ class PaymentModel extends BaseModel {
 
     return this.model.create({
       data: {
-        fee_id: Number(feeId ?? (Array.isArray(feeIds) ? Number(feeIds[0]) : undefined)),
-        amount_paid: amount,
-        percentage_paid: Number(percentagePaid.toFixed(2)),
-        balance_due: balanceDue,
-        transaction_ref: reference,
-        status,
-        student_email: studentEmail,
-        student_name: studentName,
-        jamb_number: jambNumber,
-        matric_number: matricNumber,
+        feeId: primaryFeeId,
+        amount: amount,
+        percentagePaid: Number(percentagePaid.toFixed(2)),
+        balanceDue: balanceDue,
+        reference: reference,
+        status: status.toUpperCase(),
+        userId,
+        payerType,
+        studentEmail,
+        studentName,
+        jambNumber,
+        matricNumber,
+        applicantId,
+        applicationId,
+        programId,
+        programLevelId,
+        semester,
         level,
-        phone_number: phoneNumber,
+        phoneNumber,
         address,
-        items,
-        original_reference: originalReference,
-        is_manual: isManual,
-        recorded_by: recordedBy,
-        is_balance_payment: isBalancePayment,
-        session_id: sessionId,
-        bank_transfer_ref: bankTransferRef,
+        channel,
+        items: items || undefined,
+        originalReference,
+        sessionId: sessionId ? String(sessionId) : null,
+        
+        // Metadata for fields not in schema
+        metadata: {
+          isManual,
+          recordedBy,
+          isBalancePayment,
+          bankTransferRef
+        },
       },
     });
   }
 
   async updateStatusByRef(reference, status) {
-    return this.model.update({ where: { transaction_ref: reference }, data: { status } });
+    return this.model.update({ where: { reference }, data: { status: status.toUpperCase() } });
   }
 
   async setReceiptUrlById(id, url) {
-    return this.model.update({ where: { payment_id: Number(id) }, data: { receipt_drive_url: url } });
+    return this.model.update({ where: { id }, data: { proofUrl: url } });
   }
 
   async setReferenceById(id, newReference) {
-    return this.model.update({ where: { payment_id: Number(id) }, data: { transaction_ref: newReference } });
+    return this.model.update({ where: { id }, data: { reference: newReference } });
   }
 
   async updateBalanceByRef(reference, amountToAdd) {
@@ -109,29 +211,38 @@ class PaymentModel extends BaseModel {
     if (Array.isArray(payment.items) && payment.items.length > 0) {
       totalAmount = payment.items.reduce((sum, it) => sum + Number(it.amount || 0), 0);
     } else {
-      const fee = await this.prisma.fee.findUnique({ where: { fee_id: payment.fee_id } });
+      const fee = await this.prisma.fee.findUnique({ where: { id: payment.feeId } });
       totalAmount = Number(fee?.amount || 0);
     }
 
-    const currentPaid = Number(payment.amount_paid || 0);
+    const currentPaid = Number(payment.amount || 0);
     const add = Number(amountToAdd || 0);
     if (add <= 0) throw new Error('Amount to add must be positive');
-    // if (add > Math.max(0, totalAmount - currentPaid)) throw new Error('Amount exceeds remaining balance');
 
     const newPaid = currentPaid + add;
     const newBalance = Math.max(0, totalAmount - newPaid);
     const pct = totalAmount > 0 ? Math.min(100, Math.max(0, (newPaid / totalAmount) * 100)) : 0;
 
-    const status = newBalance <= 0 ? 'successful' : 'pending';
+    const status = newBalance <= 0 ? 'SUCCESSFUL' : 'PENDING'; // Enum values
 
     return this.model.update({
-      where: { transaction_ref: reference },
+      where: { reference },
       data: {
-        amount_paid: newPaid,
-        balance_due: newBalance,
-        percentage_paid: Number(pct.toFixed(2)),
-        status,
+        amount: newPaid,
+        balanceDue: newBalance,
+        percentagePaid: Number(pct.toFixed(2)),
+        status: status, // status is Enum
       },
+    });
+  }
+
+  async updateMatricByApplicationId(applicationId, matricNumber) {
+    return this.model.updateMany({
+      where: { applicationId },
+      data: {
+        matricNumber,
+        payerType: 'STUDENT'
+      }
     });
   }
 
@@ -139,13 +250,13 @@ class PaymentModel extends BaseModel {
     const twoDaysAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
     return this.model.updateMany({
       where: {
-        status: 'pending',
-        payment_date: {
+        status: 'PENDING',
+        createdAt: {
           lt: twoDaysAgo,
         },
       },
       data: {
-        status: 'failed',
+        status: 'FAILED',
       },
     });
   }

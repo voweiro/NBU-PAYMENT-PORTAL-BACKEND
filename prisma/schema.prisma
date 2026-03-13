@@ -7,109 +7,98 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Program {
-  program_id   Int         @id @default(autoincrement())
-  program_name String
-  program_type ProgramType
-  fees         Fee[]
-}
-
 model Fee {
-  fee_id       Int       @id @default(autoincrement())
-  program_id   Int
-  fee_category String
+  id           String    @id @default(uuid())
+  programId    String?   // Optional: specific to a program
+  facultyId    String?   // Optional: specific to a faculty
+  departmentId String?   // Optional: specific to a department
+  name         String    // e.g., "Acceptance Fee", "Tuition Fee"
   amount       Decimal   @db.Decimal(14, 2)
-  semester     String?
-  levels       Level[]   @default([])
-  program      Program   @relation(fields: [program_id], references: [program_id])
+  currency     String    @default("NGN")
+  description  String?
+  
+  // NEW: Distinguish by Program Level (UG, PG, DIPLOMA)
+  programType  String?   // e.g., "UNDERGRADUATE", "POSTGRADUATE"
+  
+  levels       Json?     // ["L100", "L200"] or "ALL"
+  semester     String?   // "FIRST", "SECOND", "ALL"
+  sessionId    String?   
+  programLevelId String?   // NEW: Link to Academic Service ProgramLevel
+  
+  hostelType   String?   
+  type         FeeType?
+  
+  mandatory    Boolean   @default(true)
   payments     Payment[]
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 }
 
-model Admin {
-  admin_id   Int       @id @default(autoincrement())
-  name       String
-  email      String    @unique
-  password   String
-  role       AdminRole @default(admin)
-  created_at DateTime  @default(now())
-  audit_logs AuditLog[]
-  recorded_payments Payment[]
-}
-
-model AcademicSession {
-  session_id   Int      @id @default(autoincrement())
-  session_name String   @unique // e.g. "2023/2024"
-  is_current   Boolean  @default(false)
-  start_date   DateTime?
-  end_date     DateTime?
-  created_at   DateTime @default(now())
-  updated_at   DateTime @updatedAt
-  payments     Payment[]
-}
-
-model AuditLog {
-  id          Int      @id @default(autoincrement())
-  admin_id    Int
-  admin       Admin    @relation(fields: [admin_id], references: [admin_id])
-  action      String
-  details     Json?
-  ip_address  String?
-  created_at  DateTime @default(now())
-}
 
 model Payment {
-  payment_id         Int           @unique(map: "unique_payment_id") @default(autoincrement())
-  fee_id             Int
-  amount_paid        Decimal       @db.Decimal(14, 2)
-  transaction_ref    String        @id @unique
-  status             PaymentStatus
-  payment_date       DateTime      @default(now())
-  receipt_drive_url  String?
-  student_email      String
-  student_name       String?
-  jamb_number        String?
-  matric_number      String?
-  level              Level?
-  address            String?
-  phone_number       String?
-  items              Json?
-  percentage_paid    Decimal?      @db.Decimal(5, 2)
-  balance_due        Decimal?      @db.Decimal(14, 2)
-  original_reference String?
-  bank_transfer_ref  String?
-  is_manual         Boolean   @default(false)
-  is_balance_payment Boolean   @default(false)
-  recorded_by       Int?
-  recorder          Admin?    @relation(fields: [recorded_by], references: [admin_id])
-  fee                Fee           @relation(fields: [fee_id], references: [fee_id])
-  session_id        Int?
-  session           AcademicSession? @relation(fields: [session_id], references: [session_id])
+  id                String        @id @default(uuid())
+  reference         String        @unique
+  amount            Decimal       @db.Decimal(14, 2)
+  status            PaymentStatus @default(PENDING)
+  
+  // USER IDENTIFICATION
+  userId            String        // Global Auth UUID (always present)
+  payerType         PayerType     // NEW: Tells us if they were an APPLICANT or STUDENT at time of payment
+  
+  // SNAPSHOT FIELDS (Populated based on availability)
+  studentName       String?
+  studentEmail      String?
+  matricNumber      String?       // Null for applicants
+  jambNumber        String?       // Null for PG or non-JAMB programs
+  applicantId       String?       
+  applicationId     String?       // The primary link for admission tracking
+  
+  // ACADEMIC CONTEXT
+  programId         String? 
+  sessionId         String? 
+  programLevelId    String?       // NEW: Link to Academic Service ProgramLevel
+  level             String?       // e.g., "L100"
+  semester          String?
+  phoneNumber       String?
+  address           String?
+  
+  // FEE RELATION
+  feeId             String
+  fee               Fee           @relation(fields: [feeId], references: [id])
+  items             Json?         
+  
+  // TRACKING
+  channel           String?       // PAYSTACK, etc.
+  percentagePaid    Decimal?      @db.Decimal(5, 2)
+  balanceDue        Decimal?      @db.Decimal(14, 2)
+  originalReference String?       
+  
+  metadata          Json?         
+  proofUrl          String?       // For manual uploads
+  verifiedBy        String?       
+  verifiedAt        DateTime? 
+  
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
 }
 
-enum Level {
-  L100
-  L200
-  L300
-  L400
-  L500
-  L600
-  ALL
-}
-
-enum ProgramType {
-  undergraduate
-  postgraduate
-  diploma
-  pre_degree
-}
-
-enum AdminRole {
-  super_admin
-  admin
+enum PayerType {
+  APPLICANT
+  STUDENT
 }
 
 enum PaymentStatus {
-  successful
-  pending
-  failed
+  PENDING
+  SUCCESSFUL
+  FAILED
+  ABANDONED
+  VERIFYING
+}
+
+enum FeeType {
+  APPLICATION_FORM
+  TUITION
+  ACCEPTANCE
+  HOSTEL
+  OTHER
 }

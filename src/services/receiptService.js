@@ -1,29 +1,57 @@
 const PDFDocument = require('pdfkit');
-const { google } = require('googleapis');
-const { Readable } = require('stream');
+const { S3Client, PutObjectCommand, HeadBucketCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const path = require('path');
 const fs = require('fs');
 const QRCode = require('qrcode');
 const crypto = require('crypto');
 
-function createOAuthClient() {
-  const client = new google.auth.OAuth2(
-    process.env.GOOGLE_DRIVE_CLIENT_ID,
-    process.env.GOOGLE_DRIVE_CLIENT_SECRET
-  );
-  client.setCredentials({ refresh_token: process.env.GOOGLE_DRIVE_REFRESH_TOKEN });
-  return client;
+const bucket = process.env.RAILWAY_BUCKET_NAME;
+const endpoint = process.env.RAILWAY_BUCKET_ENDPOINT;
+const region = process.env.RAILWAY_BUCKET_REGION || 'auto';
+const accessKeyId = process.env.RAILWAY_BUCKET_ACCESS_KEY_ID;
+const secretAccessKey = process.env.RAILWAY_BUCKET_SECRET_ACCESS_KEY;
+
+const s3 = new S3Client({
+  region,
+  endpoint,
+  credentials: {
+    accessKeyId,
+    secretAccessKey,
+  },
+  forcePathStyle: true,
+});
+
+function getPublicReceiptUrl(key) {
+  const publicBase = process.env.RAILWAY_BUCKET_PUBLIC_BASE_URL || process.env.PAYMENT_PUBLIC_BASE_URL;
+  if (publicBase) return `${publicBase.replace(/\/$/, '')}/${encodeURIComponent(key)}`;
+  if (endpoint && bucket) return `${endpoint.replace(/\/$/, '')}/${bucket}/${encodeURIComponent(key)}`;
+  return key;
+}
+
+// Generate a presigned URL for secure access
+async function getPresignedReceiptUrl(key, expiresIn = 3600) {
+  try {
+    const command = new GetObjectCommand({
+      Bucket: bucket,
+      Key: key,
+    });
+    return await getSignedUrl(s3, command, { expiresIn });
+  } catch (error) {
+    console.error('Failed to generate presigned URL:', error);
+    return null;
+  }
 }
 
 // Generate security hash for anti-forgery
 function generateSecurityHash(payment, fee) {
-  const data = `${payment.payment_id}-${payment.transaction_ref}-${payment.amount_paid}-${fee.fee_id}-${payment.payment_date}`;
+  const data = `${payment.id}-${payment.reference}-${payment.amount}-${fee.id}-${payment.createdAt}`;
   return crypto.createHash('sha256').update(data + process.env.JWT_SECRET).digest('hex').substring(0, 16).toUpperCase();
 }
 
 // Generate QR code verification URL
 async function generateQRCode(payment) {
-  const verificationUrl = `${process.env.FRONTEND_URL}/payment/lookup?ref=${encodeURIComponent(payment.transaction_ref)}`;
+  const verificationUrl = `${process.env.FRONTEND_URL}/payment/lookup?ref=${encodeURIComponent(payment.reference)}`;
   return await QRCode.toDataURL(verificationUrl, {
     errorCorrectionLevel: 'M',
     type: 'image/png',
@@ -109,7 +137,7 @@ async function generateReceiptPDFBuffer({ payment, fee, program, session, isBala
 
       // Right: Receipt No
       doc.font('Helvetica-Bold').text('Transaction Ref:', 350, metaY);
-      doc.font('Helvetica').fillColor(colors.danger).text(payment.transaction_ref, 440, metaY);
+      doc.font('Helvetica').fillColor(colors.danger).text(payment.reference, 440, metaY);
 
       drawLine(metaY + 20);
 
@@ -123,26 +151,40 @@ async function generateReceiptPDFBuffer({ payment, fee, program, session, isBala
       let currentY = studentY + 15;
       const rowHeight = 20;
 
-      // Row 1: Name & Matric
+      // Row 1: Name & ID
       doc.fillColor(colors.dark).fontSize(10);
-      doc.font('Helvetica').text('Student Name:', fieldX, currentY);
-      doc.font('Helvetica-Bold').text(payment.student_name || 'N/A', valueX, currentY);
+      const nameLabel = payment.applicantId ? 'Applicant Name:' : 'Student Name:';
+      doc.font('Helvetica').text(nameLabel, fieldX, currentY);
+      doc.font('Helvetica-Bold').text(payment.studentName || 'N/A', valueX, currentY);
+
+      // ID Row
+      currentY += rowHeight;
+      let idLabel = 'Matric / JAMB No:';
+      let idValue = payment.matricNumber || payment.jambNumber || 'N/A';
+      
+      if (payment.applicantId || payment.applicationId) {
+        idLabel = 'Application ID:';
+        idValue = payment.applicationId || payment.applicantId;
+      }
+
+      doc.font('Helvetica').text(idLabel, fieldX, currentY);
+      doc.font('Helvetica-Bold').text(idValue, valueX, currentY);
       
       // Row 2: Program
       currentY += rowHeight;
       doc.font('Helvetica').text('Program of Study:', fieldX, currentY);
-      doc.font('Helvetica-Bold').text(program.program_name, valueX, currentY);
+      doc.font('Helvetica-Bold').text(program?.programName || program?.name || 'N/A', valueX, currentY);
 
-      // Row 3: Session (NEW!)
+      // Row 3: Session
       currentY += rowHeight;
       doc.font('Helvetica').text('Academic Session:', fieldX, currentY);
-      doc.font('Helvetica-Bold').text(session ? session.session_name : 'N/A', valueX, currentY);
+      doc.font('Helvetica-Bold').text(session ? (session.sessionName || session.name) : 'N/A', valueX, currentY);
 
       // Row 4: Level & Semester
       currentY += rowHeight;
       doc.font('Helvetica').text('Level / Semester:', fieldX, currentY);
       const levelTxt = payment.level ? `${payment.level} Level` : 'N/A';
-      const semTxt = fee.semester ? `${fee.semester} Semester` : '';
+      const semTxt = fee?.semester ? `${fee.semester} Semester` : '';
       doc.font('Helvetica-Bold').text(`${levelTxt} ${semTxt ? ` - ${semTxt}` : ''}`, valueX, currentY);
 
       // 5. Payment Details Section
@@ -164,8 +206,8 @@ async function generateReceiptPDFBuffer({ payment, fee, program, session, isBala
       // Table Content
       const items = Array.isArray(payment.items) ? payment.items : null;
       const feeName = items && items.length > 0 
-          ? items.map(i => i.fee_category).join(', ') 
-          : (fee.fee_category || 'Tuition Fee');
+          ? items.map(i => i.name || i.feeName).join(', ') 
+          : (fee?.name || 'Tuition Fee');
       
       doc.fillColor(colors.dark).fontSize(10).font('Helvetica');
       const startY = currentY + 10;
@@ -177,7 +219,7 @@ async function generateReceiptPDFBuffer({ payment, fee, program, session, isBala
       // Print Amount
       const fullAmount = items && items.length > 0
         ? items.reduce((sum, it) => sum + Number(it.amount || 0), 0)
-        : Number(fee.amount || 0);
+        : Number(fee?.amount || 0);
 
       doc.text(fullAmount.toLocaleString(undefined, { minimumFractionDigits: 2 }), 450, startY, { align: 'right' });
       
@@ -190,8 +232,6 @@ async function generateReceiptPDFBuffer({ payment, fee, program, session, isBala
       
       // Summary Box Background
       const summaryBoxHeight = isBalanceSettlement ? 130 : 110;
-      // Calculate start of summary box to be right aligned or full width? 
-      // Let's make it a compact right-aligned card for better visual hierarchy
       const summaryWidth = 280;
       const summaryX = 555 - summaryWidth;
       
@@ -213,10 +253,10 @@ async function generateReceiptPDFBuffer({ payment, fee, program, session, isBala
 
       printSummaryRow('Total Fees:', `NGN ${fullAmount.toLocaleString()}`, true);
       
-      const amountPaid = Number(payment.amount_paid || 0);
+      const amountPaid = Number(payment.amount || 0);
       printSummaryRow('Amount Paid:', `NGN ${amountPaid.toLocaleString()}`, true, colors.success);
       
-      const storedPct = Number(payment.percentage_paid ?? 0);
+      const storedPct = Number(payment.percentagePaid ?? 0);
       const computedPct = fullAmount > 0 ? (amountPaid / fullAmount) * 100 : 0;
       const percentageDisplay = Math.round(Number.isFinite(storedPct) && storedPct > 0 ? storedPct : computedPct);
       printSummaryRow('Percentage:', `${percentageDisplay}%`, false);
@@ -265,7 +305,7 @@ async function generateReceiptPDFBuffer({ payment, fee, program, session, isBala
       
       // Hash Info
       doc.font('Helvetica-Bold').fillColor(colors.primary)
-         .text(`DOC ID: ${securityHash}  |  REF: ${payment.transaction_ref}`, footerTextX, footerY + 48);
+         .text(`DOC ID: ${securityHash}  |  REF: ${payment.reference}`, footerTextX, footerY + 48);
       
       // Generated Timestamp
       doc.font('Helvetica').fillColor('#9CA3AF')
@@ -280,49 +320,57 @@ async function generateReceiptPDFBuffer({ payment, fee, program, session, isBala
 
 
 
-async function uploadToDrive(buffer, filename) {
-  // Guard: ensure Drive credentials are configured
-  if (!process.env.GOOGLE_DRIVE_CLIENT_ID || !process.env.GOOGLE_DRIVE_CLIENT_SECRET || !process.env.GOOGLE_DRIVE_REFRESH_TOKEN) {
-    throw new Error('Google Drive credentials not configured');
+async function uploadToBucket(buffer, filename) {
+  if (!bucket || !endpoint || !accessKeyId || !secretAccessKey) {
+    throw new Error('Railway bucket credentials not configured');
   }
-  const auth = createOAuthClient();
-  const drive = google.drive({ version: 'v3', auth });
-
-  const res = await drive.files.create({
-    requestBody: {
-      name: filename,
-      mimeType: 'application/pdf',
-      parents: process.env.GOOGLE_DRIVE_PARENT_FOLDER ? [process.env.GOOGLE_DRIVE_PARENT_FOLDER] : undefined,
-    },
-    media: {
-      mimeType: 'application/pdf',
-      // googleapis expects a stream; convert Buffer to Readable to avoid
-      // errors like: "part.body.pipe is not a function"
-      body: Readable.from(buffer),
-    },
-    fields: 'id',
-  });
-
-  const fileId = res.data.id;
-  // Make file readable via link
+  const key = filename;
+  
   try {
-    await drive.permissions.create({
-      fileId,
-      requestBody: { role: 'reader', type: 'anyone' },
-    });
-  } catch (e) {
-    // ignore permission errors
+    // Try to upload with public access first
+    await s3.send(new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: buffer,
+      ContentType: 'application/pdf',
+      ACL: 'public-read' // Make the file publicly accessible
+    }));
+    
+    // Try to get a public URL first
+    const publicUrl = getPublicReceiptUrl(key);
+    
+    // Test if the public URL is accessible by trying to generate a presigned URL as fallback
+    try {
+      const presignedUrl = await getPresignedReceiptUrl(key, 86400); // 24 hours
+      return { fileKey: key, fileUrl: publicUrl, presignedUrl };
+    } catch (presignError) {
+      console.warn('Could not generate presigned URL, using public URL:', presignError);
+      return { fileKey: key, fileUrl: publicUrl };
+    }
+  } catch (uploadError) {
+    // If ACL fails, try without ACL and use presigned URL
+    if (uploadError.name === 'AccessDenied') {
+      console.warn('Public upload failed, trying private upload with presigned URL');
+      await s3.send(new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: buffer,
+        ContentType: 'application/pdf'
+      }));
+      
+      const presignedUrl = await getPresignedReceiptUrl(key, 86400); // 24 hours
+      return { fileKey: key, fileUrl: presignedUrl, isPresigned: true };
+    }
+    throw uploadError;
   }
-  const driveUrl = `https://drive.google.com/file/d/${fileId}/view`;
-  return { fileId, driveUrl };
 }
 
 async function generateAndUploadReceipt({ payment, fee, program, session, isBalanceSettlement = false }) {
   const buffer = await generateReceiptPDFBuffer({ payment, fee, program, session, isBalanceSettlement });
-  const filename = `NBU-Receipt-${payment.transaction_ref}.pdf`;
+  const filename = `NBU-Receipt-${payment.reference}.pdf`;
   try {
-    const { driveUrl } = await uploadToDrive(buffer, filename);
-    return { driveUrl, buffer, filename };
+    const uploadResult = await uploadToBucket(buffer, filename);
+    return { driveUrl: uploadResult.fileUrl, buffer, filename };
   } catch (err) {
     console.error('❌ Receipt upload failed:', err?.message || err);
     // Fallback: still return buffer and filename so email can attach
@@ -332,13 +380,14 @@ async function generateAndUploadReceipt({ payment, fee, program, session, isBala
 
 async function verifyDriveConnection() {
   try {
-    const auth = createOAuthClient();
-    const drive = google.drive({ version: 'v3', auth });
-    await drive.files.list({ pageSize: 1, fields: 'files(id)' });
-    console.log('✅ Connected to Google Drive');
+    if (!bucket || !endpoint || !accessKeyId || !secretAccessKey) {
+      throw new Error('Railway bucket credentials not configured');
+    }
+    await s3.send(new HeadBucketCommand({ Bucket: bucket }));
+    console.log('✅ Connected to Railway bucket');
     return true;
   } catch (err) {
-    console.error('❌ Google Drive connection failed:', err.message);
+    console.error('❌ Railway bucket connection failed:', err.message);
     return false;
   }
 }

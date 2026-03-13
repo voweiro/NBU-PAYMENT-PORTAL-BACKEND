@@ -10,6 +10,32 @@ class PaymentsController {
     this.emailService = emailService;
   }
 
+  async getMyPayments(req, res) {
+    try {
+      if (!req.user || !req.user.id) {
+        return ApiResponse.error(res, 'Unauthorized', 401);
+      }
+      const userId = req.user.id;
+
+      // Fetch by userId (primary link to Auth Service)
+      const payments = await this.paymentModel.getByUserId(userId);
+      
+      // Also fetch by applicantId (if different but linked)
+      const applicantPayments = await this.paymentModel.getByApplicantId(userId);
+      
+      // Merge and deduplicate
+      const paymentMap = new Map();
+      payments.forEach(p => paymentMap.set(p.id, p));
+      applicantPayments.forEach(p => paymentMap.set(p.id, p));
+      
+      const uniquePayments = Array.from(paymentMap.values()).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+      return ApiResponse.ok(res, uniquePayments);
+    } catch (err) {
+      return ApiResponse.error(res, err);
+    }
+  }
+
   async getByRef(req, res) {
     try {
       const { reference } = req.params;
@@ -17,21 +43,23 @@ class PaymentsController {
       if (!payment) return ApiResponse.error(res, 'Payment not found', 404);
       // Return a concise summary useful for student lookup
       return ApiResponse.ok(res, {
-        payment_id: payment.payment_id,
-        transaction_ref: payment.transaction_ref,
+        id: payment.id,
+        reference: payment.reference,
         status: payment.status,
-        amount_paid: payment.amount_paid,
-        balance_due: payment.balance_due,
-        percentage_paid: payment.percentage_paid,
+        amount: payment.amount,
+        balanceDue: payment.balanceDue,
+        percentagePaid: payment.percentagePaid,
         items: payment.items,
-        receipt_drive_url: payment.receipt_drive_url ?? null,
-        student_email: payment.student_email,
-        student_name: payment.student_name ?? null,
-        fee_id: payment.fee_id,
-        phone_number: payment.phone_number,
+        proofUrl: payment.proofUrl ?? null,
+        studentEmail: payment.studentEmail,
+        studentName: payment.studentName ?? null,
+        feeId: payment.feeId,
+        phoneNumber: payment.phoneNumber,
         address: payment.address,
-        jamb_number: payment.jamb_number,
-        matric_number: payment.matric_number,
+        jambNumber: payment.jambNumber,
+        matricNumber: payment.matricNumber,
+        applicantId: payment.applicantId,
+        applicationId: payment.applicationId,
         level: payment.level,
       });
     } catch (err) {
@@ -59,6 +87,39 @@ class PaymentsController {
     }
   }
 
+  async getByApplicationId(req, res) {
+    try {
+      const { applicationId } = req.params;
+      const payments = await this.paymentModel.getByApplicationId(applicationId);
+      return ApiResponse.ok(res, payments);
+    } catch (err) {
+      return ApiResponse.error(res, err);
+    }
+  }
+
+  async getByApplicantId(req, res) {
+    try {
+      const { applicantId } = req.params;
+      const payments = await this.paymentModel.getByApplicantId(applicantId);
+      return ApiResponse.ok(res, payments);
+    } catch (err) {
+      return ApiResponse.error(res, err);
+    }
+  }
+
+  async getBulkStatus(req, res) {
+    try {
+      const { applicationIds } = req.query; // Comma separated IDs
+      if (!applicationIds) return ApiResponse.ok(res, []);
+      
+      const ids = applicationIds.split(',');
+      const payments = await this.paymentModel.getByApplicationIds(ids);
+      return ApiResponse.ok(res, payments);
+    } catch (err) {
+      return ApiResponse.error(res, err);
+    }
+  }
+
   async getBalanceByRef(req, res) {
     try {
       const { reference } = req.params;
@@ -70,29 +131,29 @@ class PaymentsController {
       if (Array.isArray(payment.items) && payment.items.length > 0) {
         totalAmount = payment.items.reduce((sum, it) => sum + Number(it.amount || 0), 0);
       } else {
-        const fee = await this.feeModel.getById(payment.fee_id);
+        const fee = await this.feeModel.getById(payment.feeId);
         totalAmount = Number(fee?.amount || 0);
       }
 
-      const amountPaid = Number(payment.amount_paid || 0);
-      const balanceDue = typeof payment.balance_due === 'string' || typeof payment.balance_due === 'number'
-        ? Number(payment.balance_due)
+      const amountPaid = Number(payment.amount || 0);
+      const balanceDue = typeof payment.balanceDue === 'string' || typeof payment.balanceDue === 'number'
+        ? Number(payment.balanceDue)
         : Math.max(0, totalAmount - amountPaid);
-      const pct = typeof payment.percentage_paid === 'string' || typeof payment.percentage_paid === 'number'
-        ? Number(payment.percentage_paid)
+      const pct = typeof payment.percentagePaid === 'string' || typeof payment.percentagePaid === 'number'
+        ? Number(payment.percentagePaid)
         : (totalAmount > 0 ? Math.min(100, Math.max(0, (amountPaid / totalAmount) * 100)) : 0);
 
       return ApiResponse.ok(res, {
-        payment_id: payment.payment_id,
-        transaction_ref: payment.transaction_ref,
+        id: payment.id,
+        reference: payment.reference,
         status: payment.status,
-        total_amount: totalAmount,
-        amount_paid: amountPaid,
-        balance_due: Number(balanceDue.toFixed(2)),
-        percentage_paid: Number(pct.toFixed(2)),
-        student_email: payment.student_email,
-        student_name: payment.student_name ?? null,
-        phone_number: payment.phone_number ?? null,
+        totalAmount: totalAmount,
+        amount: amountPaid,
+        balanceDue: Number(balanceDue.toFixed(2)),
+        percentagePaid: Number(pct.toFixed(2)),
+        studentEmail: payment.studentEmail,
+        studentName: payment.studentName ?? null,
+        phoneNumber: payment.phoneNumber ?? null,
         items: payment.items || null,
       });
     } catch (err) {
@@ -112,31 +173,31 @@ class PaymentsController {
       if (Array.isArray(payment.items) && payment.items.length > 0) {
         totalAmount = payment.items.reduce((sum, it) => sum + Number(it.amount || 0), 0);
       } else {
-        const fee = await this.feeModel.getById(payment.fee_id);
+        const fee = await this.feeModel.getById(payment.feeId);
         feeRecord = fee;
         totalAmount = Number(fee?.amount || 0);
       }
-      const amountPaid = Number(payment.amount_paid || 0);
+      const amountPaid = Number(payment.amount || 0);
       const remaining = Math.max(0, totalAmount - amountPaid);
       if (remaining <= 0) return ApiResponse.error(res, 'Payment already fully paid', 400);
 
-      const FRONTEND_URL = process.env.FRONTEND_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+      const FRONTEND_URL = process.env.FRONTEND_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3001';
       // Include original_reference so callback/verify can locate the existing record without mutating its reference
-      const redirectUrl = `${FRONTEND_URL}/payment/callback?original_reference=${encodeURIComponent(payment.transaction_ref)}`;
+      const redirectUrl = `${FRONTEND_URL}/payment/callback?original_reference=${encodeURIComponent(payment.reference)}`;
 
       // Use provided phone/address overrides or fallback to existing payment record
-      const effectivePhone = phoneNumber || payment.phone_number || '';
+      const effectivePhone = phoneNumber || payment.phoneNumber || '';
       const effectiveAddress = address || payment.address || '';
-      if (gateway === 'global' && (!/^\d{11}$/.test(effectivePhone))) {
-        return ApiResponse.error(res, 'Phone number must be 11 digits for GlobalPay balance payments', 400);
+      if (gateway === 'global' && (!/^\d{10,15}$/.test(effectivePhone))) {
+        return ApiResponse.error(res, 'Phone number must be 10 to 15 digits for GlobalPay balance payments', 400);
       }
 
       // Check for existing pending balance transaction for this original reference
       const existingBalancePending = await this.paymentModel.model.findFirst({
         where: {
-          original_reference: payment.transaction_ref,
-          status: 'pending',
-          amount_paid: Math.round(remaining), // Ensure amount matches remaining balance
+          originalReference: payment.reference,
+          status: 'PENDING',
+          amount: Math.round(remaining), // Ensure amount matches remaining balance (schema uses amount, not amount_paid for Payment)
         }
       });
 
@@ -145,42 +206,42 @@ class PaymentsController {
          const initData = await PaymentGateway.initiatePayment({
             gateway,
             amount: Math.round(remaining),
-            email: payment.student_email,
+            email: payment.studentEmail,
             metadata: {
-              studentName: payment.student_name,
+              studentName: payment.studentName,
               balancePayment: true,
               balanceAmount: remaining,
               phoneNumber: effectivePhone,
               address: effectiveAddress,
-              feeNames: Array.isArray(payment.items) && payment.items.length > 0 ? payment.items.map((i) => i.fee_category) : undefined,
+              feeNames: Array.isArray(payment.items) && payment.items.length > 0 ? payment.items.map((i) => i.name) : undefined,
             },
             redirectUrl,
-            reference: existingBalancePending.transaction_ref // REUSE REFERENCE
+            reference: existingBalancePending.reference // REUSE REFERENCE
          });
 
          // Update details if needed
          await this.paymentModel.model.update({
-            where: { payment_id: existingBalancePending.payment_id },
+            where: { id: existingBalancePending.id },
             data: {
-                phone_number: effectivePhone,
+                phoneNumber: effectivePhone,
                 address: effectiveAddress
             }
          });
 
-         return ApiResponse.ok(res, { reference: payment.transaction_ref, gateway_reference: existingBalancePending.transaction_ref, paymentId: payment.payment_id, balancePaymentId: existingBalancePending.payment_id, ...initData });
+         return ApiResponse.ok(res, { reference: payment.reference, gateway_reference: existingBalancePending.reference, paymentId: payment.id, balancePaymentId: existingBalancePending.id, ...initData });
       }
 
       const initData = await PaymentGateway.initiatePayment({
         gateway,
         amount: Math.round(remaining),
-        email: payment.student_email,
+        email: payment.studentEmail,
         metadata: {
-          studentName: payment.student_name,
+          studentName: payment.studentName,
           balancePayment: true,
           balanceAmount: remaining,
           phoneNumber: effectivePhone,
           address: effectiveAddress,
-          feeNames: Array.isArray(payment.items) && payment.items.length > 0 ? payment.items.map((i) => i.fee_category) : undefined,
+          feeNames: Array.isArray(payment.items) && payment.items.length > 0 ? payment.items.map((i) => i.name) : undefined,
         },
         redirectUrl,
       });
@@ -188,27 +249,33 @@ class PaymentsController {
       // Create a distinct pending payment record for the balance using the gateway reference
       const newRef = initData.reference;
       const itemsArray = (Array.isArray(payment.items) && payment.items.length > 0)
-        ? payment.items.map((it) => ({ fee_id: it.fee_id ?? payment.fee_id, fee_category: it.fee_category, amount: Number(it.amount || 0) }))
-        : (feeRecord ? [{ fee_id: feeRecord.fee_id, fee_category: feeRecord.fee_category, amount: Number(feeRecord.amount || 0) }] : undefined);
+        ? payment.items.map((it) => ({ feeId: it.feeId ?? payment.feeId, name: it.name, amount: Number(it.amount || 0) }))
+        : (feeRecord ? [{ feeId: feeRecord.id, name: feeRecord.name, amount: Number(feeRecord.amount || 0) }] : undefined);
 
       const createdBalance = await this.paymentModel.createPaymentRecord({
-        feeId: payment.fee_id,
+        feeId: payment.feeId,
         items: itemsArray,
-        studentEmail: payment.student_email,
-        studentName: payment.student_name,
+        userId: payment.userId,
+        payerType: payment.payerType,
+        studentEmail: payment.studentEmail,
+        studentName: payment.studentName,
         amount: Math.round(remaining),
         reference: newRef,
-        status: 'pending',
-        jambNumber: payment.jamb_number,
-        matricNumber: payment.matric_number,
+        status: 'PENDING',
+        jambNumber: payment.jambNumber,
+        matricNumber: payment.matricNumber,
+        applicantId: payment.applicantId,
+        applicationId: payment.applicationId,
+        programId: payment.programId,
         level: payment.level,
         phoneNumber: effectivePhone,
         address: effectiveAddress,
-        originalReference: payment.transaction_ref,
+        originalReference: payment.reference,
+        channel: gateway?.toUpperCase(),
       });
 
       // Do not overwrite the original transaction_ref; return both for client awareness
-      return ApiResponse.ok(res, { reference: payment.transaction_ref, gateway_reference: newRef, paymentId: payment.payment_id, balancePaymentId: createdBalance.payment_id, ...initData });
+      return ApiResponse.ok(res, { reference: payment.reference, gateway_reference: newRef, paymentId: payment.id, balancePaymentId: createdBalance.id, ...initData });
     } catch (err) {
       return ApiResponse.error(res, err);
     }
@@ -220,17 +287,18 @@ class PaymentsController {
       const updated = await this.paymentModel.updateBalanceByRef(reference, amount);
 
       // If fully paid now, generate receipt
-      if (updated.status === 'successful') {
+      if (updated.status === 'SUCCESSFUL') {
         try {
-          const fee = await this.feeModel.getById(updated.fee_id);
-          const program = await this.feeModel.prisma.program.findUnique({ where: { program_id: fee.program_id } });
+          const fee = await this.feeModel.getById(updated.feeId);
+          // Assuming fee.programId is stored in Fee model, but FeeModel returns Prisma object which has camelCase 'programId'
+          const program = await this.feeModel.prisma.program.findUnique({ where: { programId: fee.programId } });
           let session = null;
-          if (updated.session_id) {
-            session = await this.feeModel.prisma.academicSession.findUnique({ where: { session_id: updated.session_id } });
+          if (updated.sessionId) {
+            session = await this.feeModel.prisma.academicSession.findUnique({ where: { sessionId: updated.sessionId } });
           }
           const receipt = await ReceiptService.generateAndUploadReceipt({ payment: updated, fee, program, session, isBalanceSettlement: true });
           if (receipt.driveUrl) {
-            await this.paymentModel.setReceiptUrlById(updated.payment_id, receipt.driveUrl);
+            await this.paymentModel.setReceiptUrlById(updated.id, receipt.driveUrl);
           }
         } catch (genErr) {
           console.error('Receipt generation on balance completion failed:', genErr?.message || genErr);
@@ -238,53 +306,89 @@ class PaymentsController {
       }
 
       return ApiResponse.ok(res, {
-        payment_id: updated.payment_id,
-        transaction_ref: updated.transaction_ref,
+        id: updated.id,
+        reference: updated.reference,
         status: updated.status,
-        total_amount: (Array.isArray(updated.items) && updated.items.length > 0)
+        totalAmount: (Array.isArray(updated.items) && updated.items.length > 0)
           ? updated.items.reduce((sum, it) => sum + Number(it.amount || 0), 0)
           : undefined,
-        amount_paid: Number(updated.amount_paid),
-        balance_due: Number(updated.balance_due || 0),
-        percentage_paid: Number(updated.percentage_paid || 0),
+        amount: Number(updated.amount),
+        balanceDue: Number(updated.balanceDue || 0),
+        percentagePaid: Number(updated.percentagePaid || 0),
       });
     } catch (err) {
       return ApiResponse.error(res, err);
     }
   }
+
   async initiate(req, res) {
     try {
-      const { feeId, feeIds, studentEmail, studentName, gateway = 'global', jambNumber, matricNumber, percent, level, phoneNumber, address, sessionId } = req.validated.body || req.body;
+      const { feeId, feeIds, userId: bodyUserId, studentEmail, studentName, gateway = 'global', jambNumber, matricNumber, applicantId, applicationId, percent, level, phoneNumber, address, sessionId, programType: bodyProgramType, programId: bodyProgramId } = req.validated.body || req.body;
+      const userId = bodyUserId || applicantId || req.user?.id;
+      if (!userId) return ApiResponse.error(res, 'userId or applicantId is required', 400);
       // Support single or multiple fees
-      const ids = Array.isArray(feeIds) && feeIds.length > 0 ? feeIds.map((id) => Number(id)) : [Number(feeId)];
-      const fees = await this.feeModel.prisma.fee.findMany({ where: { fee_id: { in: ids } }, include: { program: true } });
+      const ids = Array.isArray(feeIds) && feeIds.length > 0 ? feeIds : (feeId ? [feeId] : []);
+      const fees = await this.feeModel.prisma.fee.findMany({ where: { id: { in: ids } } });
+      
+      // Since ids are UUIDs (strings), and feeIds coming from body might be strings, this is fine.
+      // Note: Fee model `id` is String @id @default(uuid()).
+      
       if (!fees || fees.length === 0) return ApiResponse.error(res, 'Fee(s) not available', 400);
       if (fees.length !== ids.length) return ApiResponse.error(res, 'Some selected fees were not found', 400);
 
-      // If program type is undergraduate, require either JAMB or Matric number
-      const program = fees[0].program;
-      if (program?.program_type === 'undergraduate' && !jambNumber && !matricNumber) {
-        return ApiResponse.error(res, 'JAMB number or Matric number is required for undergraduate payments', 400);
+      // We need program info. Since fees can be from same program, let's fetch program from first fee.
+      // Ideally fees should be from same program if paying together, or at least we check.
+      const firstFee = fees[0];
+      const programClient = this.feeModel.prisma.program;
+      const resolvedProgramId = bodyProgramId || firstFee.programId;
+      const program = programClient && resolvedProgramId
+        ? await programClient.findUnique({ where: { programId: resolvedProgramId } })
+        : null;
+      const normalizeProgramType = (value) => value ? String(value).toUpperCase() : undefined;
+      const resolvedProgramType = normalizeProgramType(bodyProgramType || program?.programType || program?.programLevel);
+      
+      // Validation Logic
+      const isUndergraduate = normalizeProgramType(program?.programType || program?.programLevel) === 'UNDERGRADUATE';
+      if (isUndergraduate) {
+        // Allow applicantId to satisfy identity requirement for new applicants
+        if (!jambNumber && !matricNumber && !applicantId) {
+           return ApiResponse.error(res, 'JAMB number, Matric number, or Applicant ID is required for undergraduate payments', 400);
+        }
+        const validLevels = ['L100', 'L200', 'L300', 'L400', 'L500', 'L600', 'ALL'];
+        const anyLevels = fees.some((f) => Array.isArray(f.levels) && f.levels.length > 0);
+        if (anyLevels) {
+          if (!level) {
+            return ApiResponse.error(res, 'Level is required for undergraduate payments', 400);
+          }
+          if (!validLevels.includes(level)) {
+            return ApiResponse.error(res, 'Invalid level selection', 400);
+          }
+          const allAllowLevel = fees.every((f) => {
+            const allowed = Array.isArray(f.levels) ? f.levels : [];
+            const isAll = allowed.includes('ALL');
+            return isAll || allowed.includes(level);
+          });
+          if (!allAllowLevel) {
+            return ApiResponse.error(res, 'Selected level is not applicable for one or more chosen fees', 400);
+          }
+        }
       }
 
-      // For undergraduate programs, validate provided level against fee.levels
-      if (program?.program_type === 'undergraduate') {
-        const validLevels = ['L100', 'L200', 'L300', 'L400', 'L500', 'L600', 'ALL'];
-        if (!level) {
-          return ApiResponse.error(res, 'Level is required for undergraduate payments', 400);
-        }
-        if (!validLevels.includes(level)) {
-          return ApiResponse.error(res, 'Invalid level selection', 400);
-        }
-        const allAllowLevel = fees.every((f) => {
-          const allowed = Array.isArray(f.levels) ? f.levels : [];
-          const isAll = allowed.includes('ALL');
-          return isAll || allowed.includes(level);
-        });
-        if (!allAllowLevel) {
-          return ApiResponse.error(res, 'Selected level is not applicable for one or more chosen fees', 400);
-        }
+      const feeProgramMismatch = resolvedProgramType
+        ? fees.find((fee) => {
+            const feeType = normalizeProgramType(fee.programType);
+            return feeType && feeType !== resolvedProgramType;
+          })
+        : null;
+      if (feeProgramMismatch) {
+        return ApiResponse.error(res, 'Selected fee is not applicable to your program type', 400);
       }
+
+      const payerType = matricNumber ? 'STUDENT' : 'APPLICANT';
+      const resolvedApplicantId = applicantId || (payerType === 'APPLICANT' ? userId : undefined);
+      const resolvedApplicationId = applicationId || undefined;
+      const resolvedJambNumber = jambNumber || undefined;
+      const resolvedMatricNumber = matricNumber || undefined;
 
       // Support partial payment: 25%, 50%, 75% or 100% for single or multiple fees
       const allowedPercents = [25, 50, 75, 100];
@@ -292,7 +396,7 @@ class PaymentsController {
       const totalAmount = fees.reduce((sum, f) => sum + Number(f.amount || 0), 0);
       const amountToCharge = Math.round(totalAmount * (pct / 100));
 
-      const FRONTEND_URL = process.env.FRONTEND_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+      const FRONTEND_URL = process.env.FRONTEND_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3001';
       // GlobalPay expects redirect to your verification/callback page; keep base clean
       const redirectUrl = `${FRONTEND_URL}/payment/callback`;
 
@@ -304,9 +408,9 @@ class PaymentsController {
         if (!phoneNumber) {
           return ApiResponse.error(res, 'Phone number is required for GlobalPay', 400);
         }
-        const numOk = /^\d{11}$/.test(String(phoneNumber));
+        const numOk = /^\d{10,15}$/.test(String(phoneNumber));
         if (!numOk) {
-          return ApiResponse.error(res, 'Phone number must be exactly 11 digits for GlobalPay', 400);
+          return ApiResponse.error(res, 'Phone number must be 10 to 15 digits for GlobalPay', 400);
         }
         if (address && String(address).trim().length < 6) {
           return ApiResponse.error(res, 'Address must be at least 6 characters for GlobalPay', 400);
@@ -316,76 +420,81 @@ class PaymentsController {
       // Check for existing pending transaction to prevent duplicates
       const existingPending = await this.paymentModel.model.findFirst({
         where: {
-          student_email: studentEmail,
-          status: 'pending',
-          fee_id: fees[0].fee_id,
-          amount_paid: amountToCharge, // Ensure amount matches
-          ...(sessionId ? { session_id: sessionId } : {})
-          // Optional: Check if same fees are selected for multi-fee?
-          // For now, primary fee_id + amount is a strong enough signal
+          studentEmail: studentEmail,
+          status: 'PENDING',
+          feeId: fees[0].id,
+          amount: amountToCharge, // Ensure amount matches
+          ...(sessionId ? { sessionId: sessionId } : {})
         }
       });
 
       if (existingPending) {
         // Reuse the existing record and its transaction reference
-        // Most gateways allow re-initializing a transaction if it hasn't been paid yet
-        // If the gateway rejects it (e.g., "Duplicate Reference"), we might need to append a retry suffix,
-        // but for now, we will try to resume the exact same session.
-        
         const initData = await PaymentGateway.initiatePayment({
           gateway,
           amount: amountToCharge,
           email: studentEmail,
-          metadata: { studentName, percent: pct, phoneNumber, address, feeNames: fees.map((f) => f.fee_category) },
+          metadata: { studentName, percent: pct, phoneNumber, address, feeNames: fees.map((f) => f.name) },
           redirectUrl,
-          reference: existingPending.transaction_ref // Pass the existing reference explicitly
+          reference: existingPending.reference // Pass the existing reference explicitly
         });
 
         // Update the existing record with any new details provided by the user
         await this.paymentModel.model.update({
-          where: { payment_id: existingPending.payment_id },
+          where: { id: existingPending.id },
           data: {
-            // transaction_ref: newRef, // KEEP OLD REF
-            student_name: studentName,
-            jamb_number: jambNumber,
-            matric_number: matricNumber,
+            userId: userId,
+            payerType: payerType,
+            studentName: studentName,
+            jambNumber: resolvedJambNumber,
+            matricNumber: resolvedMatricNumber,
+            applicantId: resolvedApplicantId,
+            applicationId: resolvedApplicationId,
+            programId: firstFee.programId || undefined,
             level: level,
-            phone_number: phoneNumber,
+            phoneNumber: phoneNumber,
             address: address,
+            channel: gateway?.toUpperCase()
           }
         });
 
-        return ApiResponse.ok(res, { reference: existingPending.transaction_ref, paymentId: existingPending.payment_id, ...initData }, 200);
+        return ApiResponse.ok(res, { reference: existingPending.reference, paymentId: existingPending.id, ...initData }, 200);
       }
 
       const initData = await PaymentGateway.initiatePayment({
         gateway,
         amount: amountToCharge,
         email: studentEmail,
-        metadata: { studentName, percent: pct, phoneNumber, address, feeNames: fees.map((f) => f.fee_category) },
+        metadata: { studentName, percent: pct, phoneNumber, address, feeNames: fees.map((f) => f.name) },
         redirectUrl,
       });
 
       const ref = initData.reference;
 
       const created = await this.paymentModel.createPaymentRecord({
-        feeId: fees[0].fee_id,
+        feeId: fees[0].id,
         feeIds: ids,
-        items: fees.map((f) => ({ fee_id: f.fee_id, fee_category: f.fee_category, amount: Number(f.amount || 0) })),
+        items: fees.map((f) => ({ feeId: f.id, name: f.name, amount: Number(f.amount || 0) })),
+        userId,
+        payerType,
         studentEmail,
         studentName,
         amount: amountToCharge,
         reference: ref,
-        status: 'pending',
-        jambNumber,
-        matricNumber,
+        status: 'PENDING',
+        jambNumber: resolvedJambNumber,
+        matricNumber: resolvedMatricNumber,
+        applicantId: resolvedApplicantId,
+        applicationId: resolvedApplicationId,
+        programId: resolvedProgramId || undefined,
         level,
         phoneNumber,
         address,
         sessionId,
+        channel: gateway?.toUpperCase()
       });
 
-      return ApiResponse.ok(res, { reference: ref, paymentId: created.payment_id, ...initData }, 201);
+      return ApiResponse.ok(res, { reference: ref, paymentId: created.id, ...initData }, 201);
     } catch (err) {
       return ApiResponse.error(res, err);
     }
@@ -393,51 +502,60 @@ class PaymentsController {
 
   async manualEntry(req, res) {
     try {
-      const { fee_id, feeIds, items, student_email, student_name, amount_paid, jamb_number, matric_number, level, phone_number, address, is_balance_payment, original_reference, sessionId } = (req.validated && req.validated.body) || req.body;
+      const { feeId, feeIds, items, studentEmail, studentName, amount, jambNumber, matricNumber, applicantId, applicationId, level, phoneNumber, address, isBalancePayment, originalReference, sessionId } = (req.validated && req.validated.body) || req.body;
       const adminId = req.user?.id || req.user?.admin_id;
       if (!adminId) return ApiResponse.error(res, 'Unauthorized: Admin ID missing', 401);
 
       // Resolve items/fees
       let resolvedItems = items;
-      let primaryFeeId = fee_id;
+      let primaryFeeId = feeId;
 
       if (!resolvedItems || resolvedItems.length === 0) {
-        const ids = Array.isArray(feeIds) && feeIds.length > 0 ? feeIds.map((id) => Number(id)) : (fee_id ? [Number(fee_id)] : []);
+        const ids = Array.isArray(feeIds) && feeIds.length > 0 ? feeIds : (feeId ? [feeId] : []);
         if (ids.length > 0) {
-           const fees = await this.feeModel.prisma.fee.findMany({ where: { fee_id: { in: ids } } });
-           resolvedItems = fees.map(f => ({ fee_id: f.fee_id, fee_category: f.fee_category, amount: Number(f.amount || 0) }));
+           const fees = await this.feeModel.prisma.fee.findMany({ where: { id: { in: ids } } });
+           resolvedItems = fees.map(f => ({ feeId: f.id, name: f.name, amount: Number(f.amount || 0) }));
            if (!primaryFeeId && ids.length > 0) primaryFeeId = ids[0];
         }
       }
       
       const reference = `NBUPORTAL_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
 
+      const userId = applicantId || applicationId || matricNumber || jambNumber;
+      if (!userId) return ApiResponse.error(res, 'applicantId or matricNumber is required for manual payments', 400);
+      const payerType = matricNumber ? 'STUDENT' : 'APPLICANT';
+
       const payment = await this.paymentModel.createPaymentRecord({
         feeId: primaryFeeId,
         items: resolvedItems,
-        studentEmail: student_email,
-        studentName: student_name,
-        amount: amount_paid,
+        userId,
+        payerType,
+        studentEmail: studentEmail,
+        studentName: studentName,
+        amount: amount,
         reference,
-        status: 'successful',
-        jambNumber: jamb_number,
-        matricNumber: matric_number,
+        status: 'SUCCESSFUL',
+        jambNumber: jambNumber,
+        matricNumber: matricNumber,
+        applicantId: applicantId,
+        applicationId: applicationId,
         level,
-        phoneNumber: phone_number,
+        phoneNumber: phoneNumber,
         address,
         isManual: true,
         recordedBy: adminId,
-        isBalancePayment: !!is_balance_payment,
-        originalReference: original_reference,
+        isBalancePayment: !!isBalancePayment,
+        originalReference: originalReference,
         sessionId,
+        channel: 'MANUAL'
       });
 
       // If this is a balance payment, update the original record
-      if (is_balance_payment && original_reference) {
+      if (isBalancePayment && originalReference) {
           try {
               // We don't check for "payment not found" here because createPaymentRecord didn't fail
               // But updateBalanceByRef will throw if not found.
-              const updatedOriginal = await this.paymentModel.updateBalanceByRef(original_reference, amount_paid);
+              const updatedOriginal = await this.paymentModel.updateBalanceByRef(originalReference, amount);
               
               // If now fully paid, generate receipt for the original payment too?
               // Logic similar to processBalance could go here, but let's stick to the core requirement first.
@@ -450,14 +568,14 @@ class PaymentsController {
       // Audit Log
       await this.paymentModel.prisma.auditLog.create({
         data: {
-          admin_id: adminId,
+          admin_id: adminId, // AuditLog might still use snake_case? Assuming standard AuditLog schema.
           action: 'MANUAL_PAYMENT',
           details: {
-            payment_id: payment.payment_id,
-            transaction_ref: reference,
-            amount: amount_paid,
-            student_email,
-            is_balance_payment: !!is_balance_payment
+            paymentId: payment.id,
+            reference: reference,
+            amount: amount,
+            studentEmail,
+            isBalancePayment: !!isBalancePayment
           },
           ip_address: req.ip || req.socket.remoteAddress
         }
@@ -470,47 +588,38 @@ class PaymentsController {
         if (primaryFeeId) {
            fee = await this.feeModel.getById(primaryFeeId);
            if (fee) {
-             program = await this.feeModel.prisma.program.findUnique({ where: { program_id: fee.program_id } });
+             program = await this.feeModel.prisma.program.findUnique({ where: { programId: fee.programId } });
            }
         }
         
-        if (fee && program) {
-            let session = null;
-            if (payment.session_id) {
-               session = await this.feeModel.prisma.academicSession.findUnique({ where: { session_id: Number(payment.session_id) } });
-            }
-            const receipt = await ReceiptService.generateAndUploadReceipt({ payment, fee, program, session, isBalanceSettlement: !!is_balance_payment });
-            if (receipt.driveUrl) {
-                await this.paymentModel.setReceiptUrlById(payment.payment_id, receipt.driveUrl);
-                payment.receipt_drive_url = receipt.driveUrl;
-            }
-
-            // Send Email with Receipt
-            if (this.emailService) {
-                const { subject, html } = await buildReceiptEmail({
-                  payment,
-                  fee,
-                  program,
-                  receiptDriveUrl: receipt.driveUrl,
-                  isBalanceSettlement: !!is_balance_payment,
-                });
-
-                await this.emailService.sendMail({
-                  to: student_email,
-                  subject,
-                  text: 'Your payment was recorded successfully. Receipt attached.',
-                  html,
-                  attachments: [
-                    {
-                      filename: receipt.filename,
-                      content: receipt.buffer,
-                    },
-                  ],
-                });
-            }
+        let session = null;
+        if (sessionId && this.feeModel.prisma.academicSession) {
+            session = await this.feeModel.prisma.academicSession.findUnique({ where: { sessionId: sessionId } });
         }
-      } catch (rErr) {
-        console.error('Manual payment receipt/email generation failed:', rErr);
+
+        const receipt = await ReceiptService.generateAndUploadReceipt({ payment, fee, program, session });
+        if (receipt.driveUrl) {
+          await this.paymentModel.setReceiptUrlById(payment.id, receipt.driveUrl);
+        }
+        
+        if (studentEmail) {
+            const emailContent = await buildReceiptEmail({
+                payment,
+                fee,
+                program,
+                receiptDriveUrl: receipt.driveUrl,
+                isBalanceSettlement: !!isBalancePayment
+            });
+            await this.emailService.sendMail({
+                to: studentEmail,
+                subject: emailContent.subject,
+                html: emailContent.html,
+                attachments: receipt.buffer ? [{ filename: receipt.filename, content: receipt.buffer }] : undefined
+            });
+        }
+
+      } catch (receiptErr) {
+        console.error('Receipt generation failed:', receiptErr);
       }
 
       return ApiResponse.ok(res, payment, 201);
@@ -520,202 +629,130 @@ class PaymentsController {
   }
 
   async verify(req, res) {
-    try {
-      const { reference } = req.params;
-      const { gateway, original_reference } = req.validated.query || req.query;
-      // Attempt to find the payment using original_reference first, then the provided reference
-      const lookupRef = original_reference || reference;
-      let payment = await this.paymentModel.getByRef(lookupRef);
-      // Don't fail early; GlobalPay may pass provider ref, while our DB stores merchant ref
+      // Logic for verifying payment from gateway callback
+      // GlobalPay verification involves checking query params or calling an endpoint if needed
+      // For now, let's assume standard verification flow using Gateway Service
+      try {
+          const { reference } = req.params;
+          const payment = await this.paymentModel.getByRef(reference);
+          if (!payment) return ApiResponse.error(res, 'Payment not found', 404);
 
-      // Helper to enrich items with fee categories if missing
-      const enrichItems = async (p) => {
-        if (!p || !Array.isArray(p.items) || p.items.length === 0) return p;
-        // Check if ANY item is missing fee_category
-        const needsEnrichment = p.items.some(it => !it.fee_category);
-        if (!needsEnrichment) return p;
-        
-        const feeIds = p.items.map(it => it.fee_id).filter(id => id);
-        if (feeIds.length === 0) return p;
-        
-        const fees = await this.feeModel.prisma.fee.findMany({ where: { fee_id: { in: feeIds } } });
-        const feeMap = {};
-        fees.forEach(f => { feeMap[f.fee_id] = f.fee_category; });
-        
-        const enriched = p.items.map(it => ({
-            ...it,
-            fee_category: it.fee_category || feeMap[it.fee_id] || it.name || 'Fee'
-        }));
-        return { ...p, items: enriched };
-      };
+          // If already successful, just return
+          if (payment.status === 'SUCCESSFUL') {
+              return ApiResponse.ok(res, payment);
+          }
 
-      const verifyData = await PaymentGateway.verifyPayment({ gateway, reference });
+          // Verify with Gateway
+          // Note: GlobalPay usually sends a POST to notification URL, but we might also verify on callback
+          // We need to know which gateway was used. stored in channel? or infer?
+          // Payment model has `channel` but we didn't set it explicitly in initiate (default null).
+          // However, we know we default to 'global'.
+          
+          // If we have a gateway in payment record (future improvement), use it.
+          // For now, try GlobalPay verification if pending.
+          
+          // For GlobalPay, the verifyPayment method in service expects (reference, amount, etc.)
+          // Actually, `paymentGateway.js` `verifyPayment` implementation for GlobalPay:
+          // It checks `merchantTransactionReference`.
+          
+          const verifyData = await PaymentGateway.verifyPayment({
+              gateway: 'global', // forcing global for now as it's the active one
+              reference,
+              amount: Number(payment.amount)
+          });
 
-      const provider = String(verifyData.paymentStatus || '').toLowerCase();
-      const successVals = ['success', 'successful'];
-      const failVals = ['failed', 'declined', 'reversed', 'cancelled', 'canceled'];
-      const isSuccess = successVals.includes(provider);
-      const isFail = failVals.includes(provider);
-      const status = isSuccess ? 'successful' : isFail ? 'failed' : 'pending';
-      if (original_reference) {
-        // Balance payment flow: mark the new balance record by its own gateway reference
-        const balanceUpdateRef = verifyData.merchantRef || reference;
-        try {
-          await this.paymentModel.updateStatusByRef(balanceUpdateRef, status);
-        } catch (e) {
-          // As a fallback, try updating by the path reference
-          await this.paymentModel.updateStatusByRef(reference, status);
-        }
-
-        if (status === 'successful') {
-          // Aggregate the balance payment amount into the original record
-          const balanceRecord = await this.paymentModel.getByRef(verifyData.merchantRef || reference);
-          const addAmount = Number(balanceRecord?.amount_paid || 0);
-          try {
-            const updatedOriginal = await this.paymentModel.updateBalanceByRef(original_reference, addAmount);
-
-            // If now fully paid, generate receipt and email
-            if (updatedOriginal.status === 'successful') {
-              try {
-                const fee = await this.feeModel.getById(updatedOriginal.fee_id);
-                const program = await this.feeModel.prisma.program.findUnique({ where: { program_id: fee.program_id } });
+          const targetRef = verifyData.merchantRef || reference;
+          const statusRaw = String(verifyData.paymentStatus || '').trim().toLowerCase();
+          const codeRaw = String(verifyData.responseCode || '').trim();
+          const okCodes = new Set(['00', '0', '200']);
+          const successStates = new Set(['success', 'successful', 'approved', 'completed', 'paid']);
+          const isGatewaySuccess = !!verifyData.verified || successStates.has(statusRaw) || okCodes.has(codeRaw) || verifyData.isSuccessful === true;
+          if (isGatewaySuccess) {
+              // Update status
+              const updated = await this.paymentModel.updateStatusByRef(targetRef, 'SUCCESSFUL');
+              
+              // Generate Receipt
+               try {
+                const fee = await this.feeModel.getById(updated.feeId);
+                let program = null;
+                if (this.feeModel.prisma.program) {
+                  if (updated.programId) {
+                    program = await this.feeModel.prisma.program.findUnique({ where: { programId: updated.programId } });
+                  }
+                  if (!program && fee?.programId) {
+                    program = await this.feeModel.prisma.program.findUnique({ where: { programId: fee.programId } });
+                  }
+                }
+                let session = null;
+                if (this.feeModel.prisma.academicSession) {
+                  if (updated.sessionId) {
+                    session = await this.feeModel.prisma.academicSession.findUnique({ where: { sessionId: updated.sessionId } });
+                  }
+                  if (!session && fee?.sessionId) {
+                    session = await this.feeModel.prisma.academicSession.findUnique({ where: { sessionId: fee.sessionId } });
+                  }
+                }
+                const receipt = await ReceiptService.generateAndUploadReceipt({ payment: updated, fee, program, session });
+                if (receipt.driveUrl) {
+                    await this.paymentModel.setReceiptUrlById(updated.id, receipt.driveUrl);
+                }
                 
-                let enrichedPayment = await enrichItems(updatedOriginal);
-                
-                // Persist enriched items if changed
-                if (JSON.stringify(enrichedPayment.items) !== JSON.stringify(updatedOriginal.items)) {
-                    await this.paymentModel.model.update({
-                        where: { payment_id: updatedOriginal.payment_id },
-                        data: { items: enrichedPayment.items }
+                if (updated.studentEmail) {
+                    const emailContent = await buildReceiptEmail({
+                        payment: updated,
+                        fee,
+                        program,
+                        receiptDriveUrl: receipt.driveUrl,
+                        isBalanceSettlement: false
+                    });
+                    await this.emailService.sendMail({
+                        to: updated.studentEmail,
+                        subject: emailContent.subject,
+                        html: emailContent.html,
+                        attachments: receipt.buffer ? [{ filename: receipt.filename, content: receipt.buffer }] : undefined
                     });
                 }
-
-                let session = null;
-                if (updatedOriginal.session_id) {
-                    session = await this.feeModel.prisma.academicSession.findUnique({ where: { session_id: Number(updatedOriginal.session_id) } });
-                }
-                
-                const receipt = await ReceiptService.generateAndUploadReceipt({ payment: enrichedPayment, fee, program, session, isBalanceSettlement: true });
-                if (receipt.driveUrl) {
-                  await this.paymentModel.setReceiptUrlById(updatedOriginal.payment_id, receipt.driveUrl);
-                }
-
-                if (this.emailService) {
-                  const { subject, html } = await buildReceiptEmail({
-                    payment: enrichedPayment,
-                    fee,
-                    program,
-                    receiptDriveUrl: receipt.driveUrl,
-                    isBalanceSettlement: true,
-                  });
-                  await this.emailService.sendMail({
-                    to: updatedOriginal.student_email,
-                    subject,
-                    text: 'Your payment was successful. Receipt attached.',
-                    html,
-                    attachments: [
-                      {
-                        filename: receipt.filename,
-                        content: receipt.buffer,
-                      },
-                    ],
-                  });
-                }
-              } catch (genErr) {
-                // Do not fail verification endpoint if receipt/email generation fails
-                console.error('Receipt/email post-processing failed:', genErr?.message || genErr);
+              } catch (receiptErr) {
+                console.error('Receipt generation failed:', receiptErr);
               }
-            }
-          } catch (updErr) {
-            console.error('Balance aggregation failed:', updErr?.message || updErr);
+              
+              return ApiResponse.ok(res, updated);
           }
-        }
-      } else {
-        // Normal payment flow: mark the original record by its own reference
-        const normalUpdateRef = verifyData.merchantRef || lookupRef;
-        
-        // Ensure we have the correct payment record to check/enrich items
-        let paymentToProcess = payment;
-        if (!paymentToProcess || paymentToProcess.transaction_ref !== normalUpdateRef) {
-             paymentToProcess = await this.paymentModel.getByRef(normalUpdateRef);
-        }
 
-        if (paymentToProcess) {
-             const enriched = await enrichItems(paymentToProcess);
-             const itemsChanged = JSON.stringify(enriched.items) !== JSON.stringify(paymentToProcess.items);
-             
-             if (itemsChanged) {
-                 await this.paymentModel.model.update({
-                     where: { transaction_ref: normalUpdateRef },
-                     data: { status, items: enriched.items }
-                 });
-                 paymentToProcess = enriched;
-                 payment = enriched; // Update local variable for later use
-             } else {
-                 await this.paymentModel.updateStatusByRef(normalUpdateRef, status);
-             }
-        } else {
-             // Fallback if payment not found (should be rare)
-             await this.paymentModel.updateStatusByRef(normalUpdateRef, status);
-        }
-
-        if (status === 'successful') {
-          try {
-            // Ensure we have the correct payment record using merchantRef, if available
-            if (!payment || payment.transaction_ref !== normalUpdateRef) {
-              payment = await this.paymentModel.getByRef(normalUpdateRef);
+          const failedStatusRaw = String(verifyData.paymentStatus || '').trim().toLowerCase();
+          const failedStates = ['failed', 'declined', 'reversed', 'cancelled', 'canceled'];
+          if (failedStates.includes(failedStatusRaw)) {
+            const updated = await this.paymentModel.updateStatusByRef(targetRef, 'FAILED');
+            try {
+              if (updated?.proofUrl) {
+                await this.paymentModel.setReceiptUrlById(updated.id, null);
+                console.warn(`Audit: Cleared receipt for FAILED payment ${updated.reference}`);
+              }
+            } catch (clearErr) {
+              console.error(`Audit: Failed to clear receipt for FAILED payment ${targetRef}:`, clearErr?.message || clearErr);
             }
-            if (!payment) {
-              return ApiResponse.error(res, 'Payment not found after verification', 404);
-            }
-            
-            // Re-enrich just in case (though should be handled above)
-            payment = await enrichItems(payment);
-
-            const fee = await this.feeModel.getById(payment.fee_id);
-            const program = await this.feeModel.prisma.program.findUnique({ where: { program_id: fee.program_id } });
-            
-            let session = null;
-            if (payment.session_id) {
-                session = await this.feeModel.prisma.academicSession.findUnique({ where: { session_id: Number(payment.session_id) } });
-            }
-
-            const receipt = await ReceiptService.generateAndUploadReceipt({ payment, fee, program, session, isBalanceSettlement: false });
-            if (receipt.driveUrl) {
-              await this.paymentModel.setReceiptUrlById(payment.payment_id, receipt.driveUrl);
-            }
-
-            if (this.emailService) {
-              const { subject, html } = await buildReceiptEmail({
-                payment,
-                fee,
-                program,
-                receiptDriveUrl: receipt.driveUrl,
-                isBalanceSettlement: false,
-              });
-              await this.emailService.sendMail({
-                to: payment.student_email,
-                subject,
-                text: 'Your payment was successful. Receipt attached.',
-                html,
-                attachments: [
-                  {
-                    filename: receipt.filename,
-                    content: receipt.buffer,
-                  },
-                ],
-              });
-            }
-          } catch (genErr) {
-            // Do not fail verification endpoint if receipt/email generation fails
-            console.error('Receipt/email post-processing failed:', genErr?.message || genErr);
+            return ApiResponse.ok(res, updated);
           }
-        }
+
+          const refreshed = targetRef !== reference
+            ? await this.paymentModel.getByRef(targetRef)
+            : payment;
+          return ApiResponse.ok(res, refreshed);
+
+      } catch (err) {
+          return ApiResponse.error(res, err);
       }
+  }
 
-      const finalRef = original_reference ? (verifyData.merchantRef || reference) : (verifyData.merchantRef || lookupRef);
-      const finalPayment = await this.paymentModel.getByRef(finalRef).catch(() => null);
-      return ApiResponse.ok(res, { reference: finalRef, status, paymentId: finalPayment?.payment_id, verifyData });
+  async syncMatric(req, res) {
+    try {
+      const { applicationId, matricNumber } = req.body;
+      if (!applicationId || !matricNumber) {
+        return ApiResponse.error(res, 'applicationId and matricNumber are required', 400);
+      }
+      
+      const result = await this.paymentModel.updateMatricByApplicationId(applicationId, matricNumber);
+      return ApiResponse.ok(res, { message: 'Matric number synced to payments', count: result.count });
     } catch (err) {
       return ApiResponse.error(res, err);
     }

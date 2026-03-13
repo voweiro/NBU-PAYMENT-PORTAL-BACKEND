@@ -1,16 +1,16 @@
 const express = require('express');
 const PaymentModel = require('../models/PaymentModel');
 const FeeModel = require('../models/FeeModel');
-const ProgramModel = require('../models/ProgramModel');
 const DashboardController = require('../controllers/DashboardController');
-const { authenticateJWT, authorizeRole } = require('../middlewares/auth');
+const authMiddleware = require('../middlewares/authMiddleware');
+const authorizePermission = require('../middlewares/permissionMiddleware');
 
 const router = express.Router();
 const paymentModel = new PaymentModel();
 const feeModel = new FeeModel();
-const programModel = new ProgramModel();
-const controller = new DashboardController(paymentModel, feeModel, programModel);
+// ProgramModel removed as it belongs to academic-service
+const controller = new DashboardController(paymentModel, feeModel, null);
 
-router.get('/analytics', authenticateJWT, authorizeRole('admin', 'super_admin'), (req, res) => controller.getAnalytics(req, res));
+router.get('/analytics', authMiddleware, authorizePermission('finance:manage'), (req, res) => controller.getAnalytics(req, res));
 
 module.exports = router;

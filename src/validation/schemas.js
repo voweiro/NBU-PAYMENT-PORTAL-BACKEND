@@ -19,21 +19,48 @@ const LevelEnum = z.enum(['L100', 'L200', 'L300', 'L400', 'L500', 'L600', 'ALL']
 
 const FeeCreateSchema = z.object({
   body: z.object({
-    program_id: z.string(),
-    fee_category: z.string().min(2),
-    amount: z.number().positive(),
+    programId: z.string().optional(),
+    programType: z.string().optional(),
+    name: z.string().min(2),
+    amount: z.number().positive().max(999999999999.99, 'Amount exceeds maximum allowed (<= 999,999,999,999.99)'),
     semester: z.string().optional(),
-    levels: z.array(LevelEnum).default([]).optional(),
+    levels: z.union([
+      z.array(LevelEnum),
+      z.array(z.string())
+    ]).default([]).optional(),
+    type: z.string().optional(),
+    mandatory: z.boolean().optional(),
+    currency: z.string().default('NGN').optional(),
+    description: z.string().optional(),
+    sessionId: z.string().optional(),
+    facultyId: z.string().optional(),
+    departmentId: z.string().optional(),
+    hostelType: z.string().optional(),
+    programLevelId: z.string().optional(),
   }),
 });
 
 const FeeUpdateSchema = z.object({
   params: z.object({ id: z.string() }),
   body: z.object({
-    fee_category: z.string().min(2).optional(),
-    amount: z.number().positive().optional(),
+    name: z.string().min(2).optional(),
+    amount: z.number().positive().max(999999999999.99, 'Amount exceeds maximum allowed (<= 999,999,999,999.99)').optional(),
     semester: z.string().optional(),
-    levels: z.array(LevelEnum).optional(),
+    levels: z.union([
+      z.array(LevelEnum),
+      z.array(z.string())
+    ]).optional(),
+    type: z.string().optional(),
+    mandatory: z.boolean().optional(),
+    currency: z.string().optional(),
+    description: z.string().optional(),
+    sessionId: z.string().optional(),
+    facultyId: z.string().optional(),
+    departmentId: z.string().optional(),
+    hostelType: z.string().optional(),
+    programType: z.string().optional(),
+    programLevelId: z.string().optional(),
+    programId: z.string().optional(),
   }),
 });
 
@@ -42,18 +69,22 @@ const PaymentInitiateSchema = z.object({
     .object({
       feeId: z.string().optional(),
       feeIds: z.array(z.string()).min(1, 'Select at least one fee').optional(),
+      userId: z.string().optional(),
       studentEmail: z.string().email(),
       studentName: z.string().min(1),
       gateway: z.enum(['paystack', 'flutterwave', 'global']).default('global'),
       jambNumber: z.string().min(5).optional(),
-      matricNumber: z.string().min(5).optional(),
-      level: z.enum(['L100', 'L200', 'L300', 'L400', 'L500', 'L600', 'ALL']).optional(),
+      matricNumber: z.string().optional(),
+    applicantId: z.string().optional(),
+    applicationId: z.string().optional(),
+    programType: z.string().optional(),
+    level: z.enum(['L100', 'L200', 'L300', 'L400', 'L500', 'L600', 'ALL']).optional(),
       percent: z.union([z.literal(25), z.literal(50), z.literal(75), z.literal(100)]).optional(),
       // GlobalPay requires numeric 11-digit phone; enforce at schema level
-      phoneNumber: z.string().regex(/^\d{11}$/, 'Phone number must be 11 digits').optional(),
+      phoneNumber: z.string().regex(/^\d{10,15}$/, 'Phone number must be 10 to 15 digits').optional(),
       // Address recommended > 5 chars per GlobalPay docs
       address: z.string().min(6, 'Address must be at least 6 characters').optional(),
-      sessionId: z.number().optional(),
+      sessionId: z.union([z.string(), z.number()]).optional(),
     })
     .refine((data) => Boolean(data.feeId) || (Array.isArray(data.feeIds) && data.feeIds.length > 0), {
       message: 'Provide either feeId or feeIds',
@@ -97,7 +128,7 @@ const BalanceInitiateSchema = z.object({
     reference: z.string().min(3),
     gateway: z.enum(['paystack', 'flutterwave', 'global']).default('global'),
     // Optional overrides; required for GlobalPay if not present on original payment
-    phoneNumber: z.string().regex(/^\d{11}$/, 'Phone number must be 11 digits').optional(),
+    phoneNumber: z.string().regex(/^\d{10,15}$/, 'Phone number must be 10 to 15 digits').optional(),
     address: z.string().min(6, 'Address must be at least 6 characters').optional(),
   }),
 });

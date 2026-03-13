@@ -44,27 +44,27 @@ class DashboardController {
 
       // Get all payments
       const allPayments = await this.paymentModel.listAll();
-      const successfulPayments = allPayments.filter(p => p.status === 'successful');
-      const pendingPayments = allPayments.filter(p => p.status === 'pending');
+      const successfulPayments = allPayments.filter(p => String(p.status).toUpperCase() === 'SUCCESSFUL');
+      const pendingPayments = allPayments.filter(p => String(p.status).toUpperCase() === 'PENDING');
 
       // Current Period stats
       const currentPeriodPayments = successfulPayments.filter(p => 
-        new Date(p.payment_date) >= currentPeriodStart
+        new Date(p.createdAt) >= currentPeriodStart
       );
       
       // Previous Period stats (for trend)
       const previousPeriodPayments = successfulPayments.filter(p => 
-        new Date(p.payment_date) >= previousPeriodStart &&
-        new Date(p.payment_date) <= previousPeriodEnd
+        new Date(p.createdAt) >= previousPeriodStart &&
+        new Date(p.createdAt) <= previousPeriodEnd
       );
 
       // Calculate totals
-      const totalRevenue = successfulPayments.reduce((sum, p) => sum + Number(p.amount_paid), 0);
+      const totalRevenue = successfulPayments.reduce((sum, p) => sum + Number(p.amount), 0);
       const totalPayments = successfulPayments.length;
       const totalPending = pendingPayments.length;
 
-      const currentPeriodRevenue = currentPeriodPayments.reduce((sum, p) => sum + Number(p.amount_paid), 0);
-      const previousPeriodRevenue = previousPeriodPayments.reduce((sum, p) => sum + Number(p.amount_paid), 0);
+      const currentPeriodRevenue = currentPeriodPayments.reduce((sum, p) => sum + Number(p.amount), 0);
+      const previousPeriodRevenue = previousPeriodPayments.reduce((sum, p) => sum + Number(p.amount), 0);
 
       // Calculate percentage changes
       const revenueChange = previousPeriodRevenue > 0 
@@ -77,9 +77,9 @@ class DashboardController {
 
       // Get previous period pending count for comparison
       const previousPeriodPending = allPayments.filter(p => 
-        p.status === 'pending' && 
-        new Date(p.created_at) >= previousPeriodStart && 
-        new Date(p.created_at) <= previousPeriodEnd
+        String(p.status).toUpperCase() === 'PENDING' && 
+        new Date(p.createdAt) >= previousPeriodStart && 
+        new Date(p.createdAt) <= previousPeriodEnd
       ).length;
       
       const pendingChange = previousPeriodPending > 0 
@@ -92,10 +92,10 @@ class DashboardController {
         const monthStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
         const monthEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
         const monthPayments = successfulPayments.filter(p => {
-          const paymentDate = new Date(p.payment_date);
+          const paymentDate = new Date(p.createdAt);
           return paymentDate >= monthStart && paymentDate < monthEnd;
         });
-        const monthRevenue = monthPayments.reduce((sum, p) => sum + Number(p.amount_paid), 0);
+        const monthRevenue = monthPayments.reduce((sum, p) => sum + Number(p.amount), 0);
         
         revenueChart.push({
           label: monthStart.toLocaleDateString('en-US', { month: 'short' }),
@@ -109,7 +109,7 @@ class DashboardController {
         const monthStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
         const monthEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
         const monthPayments = successfulPayments.filter(p => {
-          const paymentDate = new Date(p.payment_date);
+          const paymentDate = new Date(p.createdAt);
           return paymentDate >= monthStart && paymentDate < monthEnd;
         });
         
@@ -120,9 +120,12 @@ class DashboardController {
       }
 
       // Get programs chart data
-      const programs = await this.programModel.getAll();
+      // const programs = await this.programModel.getAll();
+      const programs = []; // Placeholder until we can fetch from academic-service
       const programsChart = [];
       
+      /* 
+      // Logic disabled until we can fetch programs from academic-service
       for (const program of programs) {
         const programPayments = successfulPayments.filter(p => {
           // Assuming payment has program_id or we can get it through fee relationship
@@ -156,6 +159,7 @@ class DashboardController {
           programsChart.push({ label: name, value: count });
         });
       }
+      */
 
       const dashboardData = {
         stats: {

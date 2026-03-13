@@ -17,7 +17,25 @@ class FeesController {
   async getByProgramId(req, res) {
     try {
       const { programId } = req.params;
-      const fees = await this.feeModel.getByProgramId(programId);
+      // Support multiple program IDs separated by commas
+      const programIds = programId.split(',').map(id => id.trim()).filter(id => id);
+      const fees = await this.feeModel.getByProgramId(programIds);
+      return ApiResponse.ok(res, fees);
+    } catch (err) {
+      return ApiResponse.error(res, err);
+    }
+  }
+  
+  async getApplicable(req, res) {
+    try {
+      const { programId, facultyId, departmentId, sessionId, programLevelId } = req.query || {};
+      const fees = await this.feeModel.getApplicable({
+        programId: programId || undefined,
+        facultyId: facultyId || undefined,
+        departmentId: departmentId || undefined,
+        sessionId: sessionId || undefined,
+        programLevelId: programLevelId || undefined
+      });
       return ApiResponse.ok(res, fees);
     } catch (err) {
       return ApiResponse.error(res, err);
@@ -26,13 +44,23 @@ class FeesController {
 
   async create(req, res) {
     try {
-      const { program_id, fee_category, amount, semester, levels } = req.validated.body || req.body;
+      const { programId, programType, name, amount, semester, levels, type, mandatory, description, currency, sessionId, facultyId, departmentId, hostelType, programLevelId } = req.validated.body || req.body;
       const fee = await this.feeModel.create({
-        program_id: Number(program_id),
-        fee_category,
+        programId,
+        programType,
+        name,
         amount,
         semester,
         levels: Array.isArray(levels) ? levels : [],
+        type,
+        mandatory,
+        description,
+        currency,
+        sessionId,
+        facultyId,
+        departmentId,
+        hostelType,
+        programLevelId
       });
       return ApiResponse.ok(res, fee, 201);
     } catch (err) {
@@ -47,22 +75,20 @@ class FeesController {
       if (data && 'levels' in data) {
         data.levels = Array.isArray(data.levels) ? data.levels : [];
       }
-      const fee = await this.feeModel.update(Number(id), data);
+      const fee = await this.feeModel.update(id, data);
       return ApiResponse.ok(res, fee);
     } catch (err) {
       return ApiResponse.error(res, err);
     }
   }
-  //please work
 
   async remove(req, res) {
     try {
       const { id } = req.params;
-      const feeId = Number(id);
 
       // Check if there are any payments associated with this fee
       const hasPayments = await this.feeModel.prisma.payment.findFirst({ 
-        where: { fee_id: feeId } 
+        where: { feeId: id } 
       });
       
       if (hasPayments) {
@@ -73,8 +99,8 @@ class FeesController {
         );
       }
 
-      await this.feeModel.delete(feeId);
-      return ApiResponse.ok(res, { id: feeId });
+      await this.feeModel.delete(id);
+      return ApiResponse.ok(res, { id });
     } catch (err) {
       // Handle foreign key constraint violation gracefully
       if (err && err.code === 'P2003') {

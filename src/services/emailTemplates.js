@@ -27,17 +27,17 @@ function formatDate(dt) {
 
 async function buildReceiptEmail({ payment, fee, program, receiptDriveUrl, isBalanceSettlement = false }) {
   const university = 'Nigerian British University';
-  const studentName = payment?.student_name || payment?.student_email || 'Student';
-  const receiptNumber = payment?.transaction_ref || `NBU-${payment?.payment_id ?? ''}`;
-  const transactionId = payment?.transaction_ref || '-';
-  const paymentDate = formatDate(payment?.payment_date);
+  const studentName = payment?.studentName || payment?.studentEmail || 'Student';
+  const receiptNumber = payment?.reference || `NBU-${payment?.id ?? ''}`;
+  const transactionId = payment?.reference || '-';
+  const paymentDate = formatDate(payment?.createdAt);
   const paymentMethod = 'ONLINE PAYMENT';
   const items = Array.isArray(payment?.items) && payment.items.length > 0
     ? payment.items
-    : [{ name: fee?.fee_category || 'Fee', fee_category: fee?.fee_category, amount: Number(fee?.amount || payment?.amount_paid || 0) }];
+    : [{ name: fee?.name || 'Fee', fee_category: fee?.name, amount: Number(fee?.amount || payment?.amount || 0) }];
 
-  const totalPaid = Number(payment?.amount_paid || 0);
-  const verifyUrl = `${process.env.FRONTEND_URL || 'http://localhost:3001'}/payment/lookup?ref=${encodeURIComponent(payment?.transaction_ref || '')}`;
+  const totalPaid = Number(payment?.amount || 0);
+  const verifyUrl = `${process.env.FRONTEND_URL || 'http://localhost:3001'}/payment/lookup?ref=${encodeURIComponent(payment?.reference || '')}`;
 
   let qrDataUrl;
   try {
@@ -57,7 +57,7 @@ async function buildReceiptEmail({ payment, fee, program, receiptDriveUrl, isBal
     .map(
       (it) => `
         <tr>
-          <td style="padding:8px 12px;border:1px solid #e5e7eb;color:#111827;font-size:14px;">${it.fee_category || it.name || fee?.fee_category || 'Fee'}</td>
+          <td style="padding:8px 12px;border:1px solid #e5e7eb;color:#111827;font-size:14px;">${it.name || it.feeName || it.fee_category || fee?.name || 'Fee'}</td>
           <td style="padding:8px 12px;border:1px solid #e5e7eb;color:#111827;font-size:14px;text-align:right;">${formatCurrency(it.amount)}</td>
         </tr>`
     )
@@ -78,8 +78,8 @@ async function buildReceiptEmail({ payment, fee, program, receiptDriveUrl, isBal
           <p style="margin:0 0 20px 0;font-size:14px;color:#334155;">Thank you for your payment. Your transaction has been processed successfully.${isBalanceSettlement ? ' The payment completes your outstanding balance.' : ''}</p>
 
           <div style="margin-bottom:16px;font-size:13px;color:#334155;">
-            <strong style="color:#0f172a;">Program:</strong> ${program?.program_name || '-'}
-            ${program?.program_type ? `<span style="margin-left:8px;color:#2563eb;border:1px solid #bfdbfe;border-radius:999px;padding:2px 8px;font-size:11px;">${String(program.program_type).toUpperCase()}</span>` : ''}
+            <strong style="color:#0f172a;">Program:</strong> ${program?.programName || program?.name || '-'}
+            ${program?.programType ? `<span style="margin-left:8px;color:#2563eb;border:1px solid #bfdbfe;border-radius:999px;padding:2px 8px;font-size:11px;">${String(program.programType).toUpperCase()}</span>` : ''}
           </div>
 
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;margin-bottom:20px;">

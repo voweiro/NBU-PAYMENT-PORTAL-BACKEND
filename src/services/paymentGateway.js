@@ -149,18 +149,19 @@ async function verifyPayment({ gateway, reference }) {
       const body = res.data;
       // Handle data as object or array (some endpoints return array)
       const dataItem = Array.isArray(body?.data) ? body.data[0] : body?.data;
-      
+
       const isSuccessful = body?.isSuccessful === true;
       const code = body?.responseCode;
-      
+
       // Check both paymentStatus (docs) and transactionStatus (observed)
       const status = dataItem?.paymentStatus || dataItem?.transactionStatus;
       const merchantRef = dataItem?.merchantTransactionReference || dataItem?.merchantTxnref || reference;
-      
-      const message = body?.responseMessage || body?.successMessage || body?.responseDescription || body?.message;
+
+      const message = body?.responseMessage || body?.successMessage || body?.responseDescription || body?.message;     
       const statusNorm = String(status || '').toLowerCase();
-      const verified = statusNorm === 'success' || statusNorm === 'successful';
-      return { gateway, reference, verified, responseCode: code, responseMessage: message, paymentStatus: status, merchantRef };
+      const successStates = new Set(['success', 'successful', 'approved', 'completed', 'paid']);
+      const verified = successStates.has(statusNorm) || isSuccessful === true || code === '00' || code === '200' || code === 200;
+      return { gateway, reference, verified, isSuccessful, responseCode: code, responseMessage: message, paymentStatus: status, merchantRef };
     } catch (err) {
       // Fallback: some integrations require query by provider payRef
       try {
@@ -174,11 +175,12 @@ async function verifyPayment({ gateway, reference }) {
         const isSuccessful2 = body2?.isSuccessful === true;
         const code2 = body2?.responseCode;
         const status2 = dataItem2?.paymentStatus || dataItem2?.transactionStatus;
-        const merchantRef2 = dataItem2?.merchantTransactionReference || dataItem2?.merchantTxnref || undefined;
+        const merchantRef2 = dataItem2?.merchantTransactionReference || dataItem2?.merchantTxnref || undefined;        
         const message2 = body2?.responseMessage || body2?.successMessage || body2?.responseDescription || body2?.message;
         const statusNorm2 = String(status2 || '').toLowerCase();
-        const verified2 = statusNorm2 === 'success' || statusNorm2 === 'successful';
-        return { gateway, reference, verified: verified2, responseCode: code2, responseMessage: message2, paymentStatus: status2, merchantRef: merchantRef2 };
+        const successStates2 = new Set(['success', 'successful', 'approved', 'completed', 'paid']);
+        const verified2 = successStates2.has(statusNorm2) || isSuccessful2 === true || code2 === '00' || code2 === '200' || code2 === 200;
+        return { gateway, reference, verified: verified2, isSuccessful: isSuccessful2, responseCode: code2, responseMessage: message2, paymentStatus: status2, merchantRef: merchantRef2 };
       } catch (err2) {
         const message = err2?.response?.data?.error || err?.response?.data?.error || err2?.message || err?.message || 'GlobalPay verify error';
         return { gateway, reference, verified: false, error: message };

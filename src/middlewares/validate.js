@@ -12,7 +12,9 @@ function validate(schema) {
       next();
     } catch (err) {
       if (err instanceof ZodError) {
-        return res.status(400).json({ success: false, error: 'Validation error', details: err.errors });
+        const details = err.errors || err.issues || [];
+        console.error('Validation Error Details:', JSON.stringify(details, null, 2));
+        return res.status(400).json({ success: false, error: 'Validation error', details });
       }
       next(err);
     }

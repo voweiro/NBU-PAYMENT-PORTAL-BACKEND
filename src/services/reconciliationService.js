@@ -16,14 +16,17 @@ async function reconcileOnce() {
     try {
       const verifyData = await PaymentGateway.verifyPayment({ gateway: 'global', reference: payment.transaction_ref });
       
-      // Use the strict verification result from the gateway service
+      // Strict mapping: require success code and status before marking successful
       let status = 'pending';
-      if (verifyData.verified) {
+      const providerStatus = String(verifyData.paymentStatus || '').trim().toLowerCase();
+      const codeRaw = String(verifyData.responseCode || '').trim();
+      const okCodes = new Set(['00', '0', '200']);
+      const isSuccess = (providerStatus === 'success' || providerStatus === 'successful') && (okCodes.has(codeRaw) || verifyData.isSuccessful === true);
+      if (isSuccess) {
         status = 'successful';
       } else {
-        const provider = String(verifyData.paymentStatus || '').toLowerCase();
         const failVals = ['failed', 'declined', 'reversed', 'cancelled', 'canceled'];
-        if (failVals.includes(provider)) {
+        if (failVals.includes(providerStatus)) {
           status = 'failed';
         }
       }
@@ -33,7 +36,17 @@ async function reconcileOnce() {
         processed += 1;
         continue;
       }
-      await paymentModel.updateStatusByRef(targetRef, status);
+      const updated = await paymentModel.updateStatusByRef(targetRef, status);
+      if (status === 'failed') {
+        try {
+          if (updated?.proofUrl) {
+            await paymentModel.setReceiptUrlById(updated.id, null);
+            console.warn(`Audit: Cleared receipt for FAILED payment during reconciliation ${updated.reference}`);
+          }
+        } catch (clearErr) {
+          console.error(`Audit: Failed to clear receipt for FAILED payment ${targetRef}:`, clearErr?.message || clearErr);
+        }
+      }
       if (status === 'successful') {
         let targetPayment = await paymentModel.getByRef(targetRef).catch(() => null);
         if (!targetPayment) targetPayment = payment;

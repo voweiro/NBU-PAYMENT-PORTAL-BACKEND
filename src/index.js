@@ -1,18 +1,25 @@
+console.log('Index: Starting...');
 const app = require('./app');
 const { verifyDriveConnection } = require('./services/receiptService');
 const { startReconciliation } = require('./services/reconciliationService');
 const { startCronJobs } = require('./services/cronService');
 const { PrismaClient } = require('@prisma/client');
 
+console.log('Index: Modules loaded');
+
 const PORT = process.env.PORT || 4000;
 const prisma = new PrismaClient();
 
 async function start() {
   try {
+    console.log('Index: Connecting to DB...');
     await prisma.$connect();
     console.log('✅ Connected to database');
-    // Verify Google Drive connectivity (non-blocking for app start)
-    await verifyDriveConnection();
+    // Verify bucket connectivity (non-blocking for app start)
+    const bucketOk = await verifyDriveConnection();
+    if (bucketOk) {
+      console.log('✅ Railway bucket connection verified');
+    }
   } catch (err) {
     console.error('❌ Database connection failed:', err.message);
     process.exit(1);
