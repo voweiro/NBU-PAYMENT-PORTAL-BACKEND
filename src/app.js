@@ -32,8 +32,9 @@ app.use("/api/", globalLimiter);
 // 3. CORS configuration: allow frontend URL and local dev origins
 const allowedOrigins = [
   process.env.FRONTEND_URL,
-  process.env.FRONTEND_URL?.replace("https://", "http://"),
-  "http://localhost:3000",
+  process.env.ADMIN_FRONTEND_URL,
+  process.env.STUDENT_FRONTEND_URL,
+  process.env.APPLICANT_FRONTEND_URL,
   "https://payment-portal.nbu.edu.ng",
 ].filter(Boolean);
 
@@ -50,8 +51,10 @@ app.use(
       if (/^http:\/\/localhost(:\d+)?$/.test(origin)) return callback(null, true);
       if (/^http:\/\/127\.0\.0\.1(:\d+)?$/.test(origin)) return callback(null, true);
 
-      // Allow any origin ending with .nbu.edu.ng
-      if (origin.endsWith('.nbu.edu.ng')) return callback(null, true);
+      // Allow institutional and Vercel domains
+      if (origin.endsWith('.nbu.edu.ng') || origin.endsWith('.vercel.app')) {
+        return callback(null, true);
+      }
 
       callback(new Error("Not allowed by CORS"));
     },

@@ -2,7 +2,7 @@ const nodemailer = require('nodemailer');
 
 function createTransport() {
   const host = process.env.EMAIL_HOST;
-  const port = parseInt(process.env.EMAIL_PORT || '587', 10);
+  const port = parseInt(process.env.EMAIL_PORT, 10);
   const user = process.env.EMAIL_USER;
   const pass = process.env.EMAIL_PASS;
 

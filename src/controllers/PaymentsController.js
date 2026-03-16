@@ -181,7 +181,7 @@ class PaymentsController {
       const remaining = Math.max(0, totalAmount - amountPaid);
       if (remaining <= 0) return ApiResponse.error(res, 'Payment already fully paid', 400);
 
-      const FRONTEND_URL = process.env.FRONTEND_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3001';
+      const FRONTEND_URL = process.env.FRONTEND_URL || process.env.NEXT_PUBLIC_APP_URL;
       // Include original_reference so callback/verify can locate the existing record without mutating its reference
       const redirectUrl = `${FRONTEND_URL}/payment/callback?original_reference=${encodeURIComponent(payment.reference)}`;
 
@@ -396,7 +396,7 @@ class PaymentsController {
       const totalAmount = fees.reduce((sum, f) => sum + Number(f.amount || 0), 0);
       const amountToCharge = Math.round(totalAmount * (pct / 100));
 
-      const FRONTEND_URL = process.env.FRONTEND_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3001';
+      const FRONTEND_URL = process.env.FRONTEND_URL || process.env.NEXT_PUBLIC_APP_URL;
       // GlobalPay expects redirect to your verification/callback page; keep base clean
       const redirectUrl = `${FRONTEND_URL}/payment/callback`;
 

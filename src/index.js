@@ -7,7 +7,7 @@ const { PrismaClient } = require('@prisma/client');
 
 console.log('Index: Modules loaded');
 
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT;
 const prisma = new PrismaClient();
 
 async function start() {

@@ -9,9 +9,9 @@ const useResend = Boolean(process.env.RESEND_API_KEY);
 let transporter;
 if (!useResend) {
   // Configure SMTP (Gmail or custom)
-  const connectionTimeout = Number(process.env.EMAIL_CONNECTION_TIMEOUT || 8000);
-  const greetingTimeout = Number(process.env.EMAIL_GREETING_TIMEOUT || 8000);
-  const socketTimeout = Number(process.env.EMAIL_SOCKET_TIMEOUT || 10000);
+  const connectionTimeout = Number(process.env.EMAIL_CONNECTION_TIMEOUT);
+  const greetingTimeout = Number(process.env.EMAIL_GREETING_TIMEOUT);
+  const socketTimeout = Number(process.env.EMAIL_SOCKET_TIMEOUT);
   const pool = String(process.env.EMAIL_POOL || '').toLowerCase() === 'true';
 
   if (useGmail) {
@@ -30,7 +30,7 @@ if (!useResend) {
   } else {
     transporter = nodemailer.createTransport({
       host: process.env.EMAIL_HOST,
-      port: Number(process.env.EMAIL_PORT || 587),
+      port: Number(process.env.EMAIL_PORT),
       secure: String(process.env.EMAIL_SECURE || '').toLowerCase() === 'true' || Number(process.env.EMAIL_PORT) === 465,
       auth: {
         user: process.env.EMAIL_USER,
@@ -61,7 +61,7 @@ if (!useResend && transporter) {
 }
 
 async function sendMail({ to, subject, text, html, attachments }) {
-  const from = process.env.EMAIL_FROM || process.env.EMAIL_USER || 'no-reply@localhost';
+  const from = process.env.EMAIL_FROM || process.env.EMAIL_USER;
 
   if (useResend) {
     // Use Resend HTTP API to avoid SMTP port restrictions on some hosts
@@ -90,7 +90,7 @@ async function sendMail({ to, subject, text, html, attachments }) {
           Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
-        timeout: Number(process.env.EMAIL_HTTP_TIMEOUT || 10000),
+        timeout: Number(process.env.EMAIL_HTTP_TIMEOUT),
       });
       const id = res.data?.id || res.data?.data?.id;
       console.log(`✅ Email sent successfully to ${to} (id=${id || 'resend'})`);

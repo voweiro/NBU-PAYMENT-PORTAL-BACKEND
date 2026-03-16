@@ -8,7 +8,7 @@ const crypto = require('crypto');
 
 const bucket = process.env.RAILWAY_BUCKET_NAME;
 const endpoint = process.env.RAILWAY_BUCKET_ENDPOINT;
-const region = process.env.RAILWAY_BUCKET_REGION || 'auto';
+const region = process.env.RAILWAY_BUCKET_REGION;
 const accessKeyId = process.env.RAILWAY_BUCKET_ACCESS_KEY_ID;
 const secretAccessKey = process.env.RAILWAY_BUCKET_SECRET_ACCESS_KEY;
 

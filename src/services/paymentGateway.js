@@ -1,7 +1,7 @@
 const axios = require('axios');
 
-const PAYSTACK_BASE_URL = process.env.PAYSTACK_BASE_URL || 'https://api.paystack.co';
-const FLW_BASE_URL = process.env.FLUTTERWAVE_BASE_URL || 'https://api.flutterwave.com/v3';
+const PAYSTACK_BASE_URL = process.env.PAYSTACK_BASE_URL;
+const FLW_BASE_URL = process.env.FLUTTERWAVE_BASE_URL;
 const GLOBALPAY_BASE_URL = process.env.GLOBALPAY_BASE_URL; // bare URL to generate payment link
 
 async function initiatePayment({ gateway, amount, email, metadata, redirectUrl }) {

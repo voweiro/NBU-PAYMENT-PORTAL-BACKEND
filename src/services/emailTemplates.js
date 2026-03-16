@@ -37,7 +37,7 @@ async function buildReceiptEmail({ payment, fee, program, receiptDriveUrl, isBal
     : [{ name: fee?.name || 'Fee', fee_category: fee?.name, amount: Number(fee?.amount || payment?.amount || 0) }];
 
   const totalPaid = Number(payment?.amount || 0);
-  const verifyUrl = `${process.env.FRONTEND_URL || 'http://localhost:3001'}/payment/lookup?ref=${encodeURIComponent(payment?.reference || '')}`;
+  const verifyUrl = `${process.env.FRONTEND_URL}/payment/lookup?ref=${encodeURIComponent(payment?.reference || '')}`;
 
   let qrDataUrl;
   try {

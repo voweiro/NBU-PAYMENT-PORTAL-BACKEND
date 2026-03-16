@@ -7,7 +7,7 @@ class ReceiptsController {
   constructor(paymentModel) {
     this.paymentModel = paymentModel;
     this.s3 = new S3Client({
-      region: process.env.RAILWAY_BUCKET_REGION || 'auto',
+      region: process.env.RAILWAY_BUCKET_REGION,
       endpoint: process.env.RAILWAY_BUCKET_ENDPOINT,
       credentials: {
         accessKeyId: process.env.RAILWAY_BUCKET_ACCESS_KEY_ID,
