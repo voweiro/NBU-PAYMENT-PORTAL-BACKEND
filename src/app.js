@@ -16,6 +16,9 @@ const cookieParser = require("cookie-parser");
 
 const app = express();
 
+// Trust reverse proxy (Vercel, Render, Nginx, etc.) for rate limiting
+app.set('trust proxy', 1);
+
 // 1. HELMET: Secure HTTP headers (CSP, HSTS, XSS protection, etc.)
 app.use(helmet());
 

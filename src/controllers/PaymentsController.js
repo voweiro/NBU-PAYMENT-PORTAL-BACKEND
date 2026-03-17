@@ -635,7 +635,7 @@ class PaymentsController {
       try {
           const { reference } = req.params;
           const payment = await this.paymentModel.getByRef(reference);
-          if (!payment) return ApiResponse.error(res, 'Payment not found', 404);
+          if (!payment) return ApiResponse.error(res, `Payment not found for reference: [${reference}]`, 404);
 
           // If already successful, just return
           if (payment.status === 'SUCCESSFUL') {
