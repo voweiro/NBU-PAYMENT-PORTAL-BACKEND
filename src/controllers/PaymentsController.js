@@ -196,8 +196,8 @@ class PaymentsController {
       const existingBalancePending = await this.paymentModel.model.findFirst({
         where: {
           originalReference: payment.reference,
-          status: 'PENDING',
-          amount: Math.round(remaining), // Ensure amount matches remaining balance (schema uses amount, not amount_paid for Payment)
+          status: { in: ['PENDING', 'FAILED', 'ABANDONED'] },
+          amount: Math.round(remaining),
         }
       });
 
@@ -216,13 +216,14 @@ class PaymentsController {
               feeNames: Array.isArray(payment.items) && payment.items.length > 0 ? payment.items.map((i) => i.name) : undefined,
             },
             redirectUrl,
-            reference: existingBalancePending.reference // REUSE REFERENCE
          });
 
-         // Update details if needed
+         // Update details and reset status to PENDING
          await this.paymentModel.model.update({
             where: { id: existingBalancePending.id },
             data: {
+                reference: initData.reference, // CRITICAL: Update to new ref from gateway
+                status: 'PENDING',
                 phoneNumber: effectivePhone,
                 address: effectiveAddress
             }
@@ -421,28 +422,30 @@ class PaymentsController {
       const existingPending = await this.paymentModel.model.findFirst({
         where: {
           studentEmail: studentEmail,
-          status: 'PENDING',
+          status: { in: ['PENDING', 'FAILED', 'ABANDONED'] },
           feeId: fees[0].id,
-          amount: amountToCharge, // Ensure amount matches
+          amount: amountToCharge,
           ...(sessionId ? { sessionId: sessionId } : {})
         }
       });
 
       if (existingPending) {
-        // Reuse the existing record and its transaction reference
         const initData = await PaymentGateway.initiatePayment({
           gateway,
           amount: amountToCharge,
           email: studentEmail,
           metadata: { studentName, percent: pct, phoneNumber, address, feeNames: fees.map((f) => f.name) },
           redirectUrl,
-          reference: existingPending.reference // Pass the existing reference explicitly
         });
 
-        // Update the existing record with any new details provided by the user
+        const newRef = initData.reference;
+
+        // Update the existing record and reset status
         await this.paymentModel.model.update({
           where: { id: existingPending.id },
           data: {
+            reference: newRef, // CRITICAL: Update to new ref from gateway
+            status: 'PENDING',
             userId: userId,
             payerType: payerType,
             studentName: studentName,
@@ -458,7 +461,7 @@ class PaymentsController {
           }
         });
 
-        return ApiResponse.ok(res, { reference: existingPending.reference, paymentId: existingPending.id, ...initData }, 200);
+        return ApiResponse.ok(res, { reference: newRef, paymentId: existingPending.id, ...initData }, 200);
       }
 
       const initData = await PaymentGateway.initiatePayment({
